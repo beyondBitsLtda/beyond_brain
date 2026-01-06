@@ -7,6 +7,7 @@ export function createTerminalUI(bus) {
   const output = document.getElementById("output");
   const form = document.getElementById("command-form");
   const input = document.getElementById("command-input");
+  input.type = "text";
 
   function appendLine(text) {
     const line = document.createElement("div");
@@ -31,6 +32,16 @@ export function createTerminalUI(bus) {
 
   bus.on("output:append", (text) => appendLine(text));
   bus.on("output:clear", () => clearOutput());
+  bus.on("input:mask", () => {
+    input.type = "password";
+  });
+  bus.on("input:unmask", () => {
+    input.type = "text";
+  });
+  bus.on("input:placeholder", (text) => {
+    input.placeholder = text ?? "";
+  });
+  bus.on("input:focus", () => input.focus());
 
   bindInput();
 
