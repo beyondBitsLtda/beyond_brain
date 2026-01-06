@@ -1,3 +1,4 @@
+
 // config.js
 // Configure as credenciais do Supabase aqui.
 // Substitua os valores placeholder pela URL do projeto e pela chave anônima.
