@@ -19,7 +19,7 @@ export function logoutCommand(bus) {
         throw signOutError;
       }
       clearSession();
-      bus.emit("output:append", "Logout realizado com sucesso.");
+      bus.emit("output:append", "OK: logout efetuado.");
     } catch (err) {
       const message = err?.message ?? "Erro desconhecido";
       bus.emit("output:append", `Erro ao sair: ${message}`);
