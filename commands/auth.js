@@ -306,6 +306,56 @@ export function authCommand({ bus }) {
   }
 }
 
+async function promptProfileCreation(user, client) {
+  return new Promise((resolve) => {
+    let username = "";
+
+    function askUsername() {
+      emitPrompt(bus, "Username:", { placeholder: "username" });
+      bus.emit("router:capture:start", {
+        echo: "normal",
+        handler: handleUsername,
+      });
+    }
+
+    async function handleUsername(value) {
+      username = value.trim();
+      if (!username) {
+        bus.emit("output:append", "Username não pode ser vazio. Tente novamente.");
+        askUsername();
+        return;
+      }
+
+      try {
+        const { profile, error } = await createProfile(client, {
+          userId: user.id,
+          username,
+        });
+
+        if (error) {
+          throw error;
+        }
+
+        setSession(user, profile ?? { username });
+        finishCapture(bus);
+        bus.emit("output:clear", "");
+        const displayName = getUsernameFallback();
+        bus.emit("output:append", `Welcome to your future brain, @${displayName}`);
+        resolve();
+      } catch (err) {
+        const friendly =
+          err?.code === "23505"
+            ? "Username já está em uso. Escolha outro."
+            : normalizeErrorMessage(err);
+        bus.emit("output:append", `Erro ao criar perfil: ${friendly}`);
+        askUsername();
+      }
+    }
+
+    askUsername();
+  });
+}
+
 export async function bootstrapSession(bus) {
   const { client, error } = getSupabaseClient();
   if (error || !client) {
