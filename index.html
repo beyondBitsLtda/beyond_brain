@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Beyond Brain Terminal</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="terminal">
+    <header class="terminal__header">BEYOND BRAIN</header>
+    <main class="terminal__screen" id="output" aria-live="polite"></main>
+    <form class="terminal__input-row" id="command-form" autocomplete="off">
+      <span class="terminal__prompt">&gt;</span>
+      <input
+        id="command-input"
+        name="command"
+        type="text"
+        autofocus
+        autocomplete="off"
+        spellcheck="false"
+        aria-label="Digite um comando"
+      />
+      <span class="terminal__cursor" aria-hidden="true"></span>
+    </form>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>
