@@ -1,1 +1,11 @@
-# beyond_brain
+# Beyond Brain
+
+## Configuração do Supabase
+1. Edite `config.js` e substitua os placeholders `COLOQUE_SUA_SUPABASE_URL` e `COLOQUE_SEU_SUPABASE_ANON_KEY` pelos valores do seu projeto.
+2. Abra o app em um navegador e use o comando `ping` no terminal para testar a conexão. O comando mostrará `ping OK` quando as credenciais estiverem corretas.
+
+## Autenticação interativa
+- `auth`: inicia o fluxo de login. Informe email e senha (campo de senha é mascarado). Sucesso limpa o terminal e mostra `Welcome to your future brain, @username`.
+- `auth --register`: inicia o cadastro com validação de senha forte (8+ com maiúscula, minúscula e número) e username obrigatório. Cria o perfil na tabela `profiles`.
+- `whoami`: mostra o usuário autenticado e o status do perfil.
+- `logout`: encerra a sessão atual.
