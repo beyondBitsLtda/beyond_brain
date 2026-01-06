@@ -174,7 +174,7 @@ export function authCommand(bus) {
         throw error;
       }
 
-      const user = data?.user;
+      const user = data?.session?.user ?? data?.user;
       if (!user) {
         throw new Error("Não foi possível recuperar o usuário da sessão.");
       }
@@ -212,13 +212,18 @@ export function authCommand(bus) {
         throw error;
       }
 
-      const user = data?.user;
-      if (!user) {
-        throw new Error("Registro criado, mas usuário não retornado. Verifique confirmação de email.");
+      const ensuredUser = await ensureSessionUser(client, email, password);
+      if (!ensuredUser) {
+        throw new Error("Registro criado, mas nenhuma sessão foi encontrada. Tente autenticar-se novamente.");
+      }
+
+      const sessionUser = await getActiveSessionUser(client);
+      if (!sessionUser || sessionUser.id !== ensuredUser.id) {
+        throw new Error("Sessão não encontrada ou diferente após cadastro. Faça login novamente.");
       }
 
       const { profile, error: profileError } = await createProfile(client, {
-        userId: user.id,
+        userId: ensuredUser.id,
         username,
       });
 
@@ -226,8 +231,7 @@ export function authCommand(bus) {
         throw profileError;
       }
 
-      const sessionUser = data.session?.user ?? user;
-      setSession(sessionUser, profile ?? null);
+      setSession(ensuredUser, profile ?? null);
       finishCapture(bus);
       bus.emit("output:clear", "");
       const displayName = getUsernameFallback();
@@ -244,6 +248,33 @@ export function authCommand(bus) {
       startRegisterFlow(client);
     }
   }
+}
+
+async function ensureSessionUser(client, email, password) {
+  const sessionUser = await getActiveSessionUser(client);
+  if (sessionUser) return sessionUser;
+
+  const { data, error } = await client.auth.signInWithPassword({
+    email,
+    password,
+  });
+
+  if (error) {
+    throw error;
+  }
+
+  const signInUser = data?.session?.user ?? data?.user ?? null;
+  if (!signInUser) {
+    throw new Error("Login não retornou sessão ativa. Verifique confirmação de email ou credenciais.");
+  }
+
+  return signInUser;
+}
+
+async function getActiveSessionUser(client) {
+  const { data, error } = await client.auth.getSession();
+  if (error) return null;
+  return data?.session?.user ?? null;
 }
 
 export async function bootstrapSession(bus) {

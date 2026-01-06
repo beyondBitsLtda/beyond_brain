@@ -19,6 +19,11 @@ export async function createProfile(client, { userId, username }) {
     username: trimmedUsername,
   };
 
-  const { error, data } = await client.from("profiles").insert(payload).select().maybeSingle();
+  const { error, data } = await client
+    .from("profiles")
+    .insert(payload)
+    .select()
+    .eq("id", userId)
+    .maybeSingle();
   return { profile: data ?? null, error };
 }
