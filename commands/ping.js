@@ -5,10 +5,9 @@ export function pingCommand(bus) {
     const { client, error } = getSupabaseClient();
 
     if (error || !client) {
-      bus.emit(
-        "output:append",
-        "ping ERR: configure SUPABASE_URL e SUPABASE_ANON_KEY em config.js antes de usar este comando."
-      );
+      const message =
+        typeof error === "string" ? error : "Configure SUPABASE_URL e SUPABASE_ANON_KEY em config.js";
+      bus.emit("output:append", `ping ERR: ${message}`);
       return;
     }
 
