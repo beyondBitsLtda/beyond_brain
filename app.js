@@ -17,7 +17,7 @@ const commands = {
   help: helpCommand(bus),
   clear: clearCommand(bus),
   ping: pingCommand(bus),
-  auth: authCommand(bus),
+  auth: authCommand({ bus }),
   logout: logoutCommand(bus),
   whoami: whoamiCommand(bus),
 };
