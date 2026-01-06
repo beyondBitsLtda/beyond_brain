@@ -26,7 +26,7 @@ export function whoamiCommand(bus) {
     }
 
     setSession(user, profile ?? null);
-    const username = getUsernameFallback();
+    const username = profile?.username ?? user.email ?? "(sem username)";
     bus.emit("output:append", `@${username}`);
   };
 }
