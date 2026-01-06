@@ -174,7 +174,7 @@ export function authCommand(bus) {
         throw error;
       }
 
-      const user = data?.user;
+      const user = data?.session?.user ?? data?.user;
       if (!user) {
         throw new Error("Não foi possível recuperar o usuário da sessão.");
       }
@@ -212,9 +212,14 @@ export function authCommand(bus) {
         throw error;
       }
 
-      const ensuredUser = await ensureSessionUser(client, email, password, data?.user);
+      const ensuredUser = await ensureSessionUser(client, email, password);
       if (!ensuredUser) {
         throw new Error("Registro criado, mas nenhuma sessão foi encontrada. Tente autenticar-se novamente.");
+      }
+
+      const sessionUser = await getActiveSessionUser(client);
+      if (!sessionUser || sessionUser.id !== ensuredUser.id) {
+        throw new Error("Sessão não encontrada ou diferente após cadastro. Faça login novamente.");
       }
 
       const { profile, error: profileError } = await createProfile(client, {
@@ -245,22 +250,31 @@ export function authCommand(bus) {
   }
 }
 
-async function ensureSessionUser(client, email, password, fallbackUser = null) {
-  const { data: sessionData } = await client.auth.getSession();
-  if (sessionData?.session?.user) {
-    return sessionData.session.user;
-  }
+async function ensureSessionUser(client, email, password) {
+  const sessionUser = await getActiveSessionUser(client);
+  if (sessionUser) return sessionUser;
 
-  const { data: signInData, error: signInError } = await client.auth.signInWithPassword({
+  const { data, error } = await client.auth.signInWithPassword({
     email,
     password,
   });
 
-  if (!signInError && (signInData?.user || signInData?.session?.user)) {
-    return signInData.user ?? signInData.session.user;
+  if (error) {
+    throw error;
   }
 
-  return fallbackUser ?? null;
+  const signInUser = data?.session?.user ?? data?.user ?? null;
+  if (!signInUser) {
+    throw new Error("Login não retornou sessão ativa. Verifique confirmação de email ou credenciais.");
+  }
+
+  return signInUser;
+}
+
+async function getActiveSessionUser(client) {
+  const { data, error } = await client.auth.getSession();
+  if (error) return null;
+  return data?.session?.user ?? null;
 }
 
 export async function bootstrapSession(bus) {
