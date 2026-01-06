@@ -99,8 +99,8 @@ export function authCommand(bus) {
 
   function startRegisterFlow(client) {
     let email = "";
-    let password = "";
     let username = "";
+    let password = "";
 
     function askEmail() {
       emitPrompt(bus, "Email para cadastro:", { placeholder: "email" });
@@ -115,30 +115,6 @@ export function authCommand(bus) {
       if (!email) {
         bus.emit("output:append", "Email não pode ser vazio. Tente novamente.");
         askEmail();
-        return;
-      }
-      askPassword();
-    }
-
-    function askPassword() {
-      emitPrompt(bus, "Senha (mín. 8, maiúscula, minúscula e número):", {
-        masked: true,
-        placeholder: "senha forte",
-      });
-      bus.emit("router:capture:start", {
-        echo: "mask",
-        handler: handlePassword,
-      });
-    }
-
-    function handlePassword(value) {
-      password = value;
-      if (!STRONG_PASSWORD_REGEX.test(password)) {
-        bus.emit(
-          "output:append",
-          "Senha fraca. Use pelo menos 8 caracteres com maiúsculas, minúsculas e números."
-        );
-        askPassword();
         return;
       }
       askUsername();
@@ -160,6 +136,31 @@ export function authCommand(bus) {
         return;
       }
 
+      askPassword();
+    }
+
+    function askPassword() {
+      emitPrompt(bus, "Senha (mín. 8, maiúscula, minúscula e número):", {
+        masked: true,
+        placeholder: "senha forte",
+      });
+      bus.emit("router:capture:start", {
+        echo: "mask",
+        handler: handlePassword,
+      });
+    }
+
+    async function handlePassword(value) {
+      password = value;
+      if (!STRONG_PASSWORD_REGEX.test(password)) {
+        bus.emit(
+          "output:append",
+          "Senha fraca. Use pelo menos 8 caracteres com maiúsculas, minúsculas e números."
+        );
+        askPassword();
+        return;
+      }
+
       await register(email, password, username, client);
     }
 
@@ -174,7 +175,7 @@ export function authCommand(bus) {
         throw error;
       }
 
-      const user = data?.user;
+      const user = data?.session?.user ?? data?.user;
       if (!user) {
         throw new Error("Não foi possível recuperar o usuário da sessão.");
       }
@@ -182,6 +183,12 @@ export function authCommand(bus) {
       const { profile, error: profileError } = await fetchProfile(client, user.id);
       if (profileError) {
         bus.emit("output:append", `Aviso: falha ao carregar perfil (${normalizeErrorMessage(profileError)}).`);
+      }
+
+      if (!profile) {
+        finishCapture(bus);
+        await promptProfileCreation(user, client);
+        return;
       }
 
       setSession(user, profile ?? null);
@@ -212,13 +219,17 @@ export function authCommand(bus) {
         throw error;
       }
 
-      const user = data?.user;
-      if (!user) {
-        throw new Error("Registro criado, mas usuário não retornado. Verifique confirmação de email.");
+      const sessionUser = data?.session?.user ?? null;
+      if (!sessionUser) {
+        finishCapture(bus);
+        clearSession();
+        bus.emit("output:append", `Cadastro criado. Enviamos um email de confirmação para ${email}.`);
+        bus.emit("output:append", "Confirme o email e depois faça login com `auth`.");
+        return;
       }
 
       const { profile, error: profileError } = await createProfile(client, {
-        userId: user.id,
+        userId: sessionUser.id,
         username,
       });
 
@@ -226,7 +237,6 @@ export function authCommand(bus) {
         throw profileError;
       }
 
-      const sessionUser = data.session?.user ?? user;
       setSession(sessionUser, profile ?? null);
       finishCapture(bus);
       bus.emit("output:clear", "");
@@ -244,6 +254,56 @@ export function authCommand(bus) {
       startRegisterFlow(client);
     }
   }
+}
+
+async function promptProfileCreation(user, client) {
+  return new Promise((resolve) => {
+    let username = "";
+
+    function askUsername() {
+      emitPrompt(bus, "Username:", { placeholder: "username" });
+      bus.emit("router:capture:start", {
+        echo: "normal",
+        handler: handleUsername,
+      });
+    }
+
+    async function handleUsername(value) {
+      username = value.trim();
+      if (!username) {
+        bus.emit("output:append", "Username não pode ser vazio. Tente novamente.");
+        askUsername();
+        return;
+      }
+
+      try {
+        const { profile, error } = await createProfile(client, {
+          userId: user.id,
+          username,
+        });
+
+        if (error) {
+          throw error;
+        }
+
+        setSession(user, profile ?? { username });
+        finishCapture(bus);
+        bus.emit("output:clear", "");
+        const displayName = getUsernameFallback();
+        bus.emit("output:append", `Welcome to your future brain, @${displayName}`);
+        resolve();
+      } catch (err) {
+        const friendly =
+          err?.code === "23505"
+            ? "Username já está em uso. Escolha outro."
+            : normalizeErrorMessage(err);
+        bus.emit("output:append", `Erro ao criar perfil: ${friendly}`);
+        askUsername();
+      }
+    }
+
+    askUsername();
+  });
 }
 
 export async function bootstrapSession(bus) {
