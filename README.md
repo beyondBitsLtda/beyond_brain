@@ -3,6 +3,7 @@
 ## Configuração do Supabase
 1. Edite `config.js` e substitua os placeholders `COLOQUE_SUA_SUPABASE_URL` e `COLOQUE_SEU_SUPABASE_ANON_KEY` pelos valores do seu projeto.
 2. Abra o app em um navegador e use o comando `ping` no terminal para testar a conexão. O comando mostrará `ping OK` quando as credenciais estiverem corretas.
+3. Não remova as palavras `export` do `config.js`. Elas são necessárias para que os módulos funcionem no navegador.
 
 ## Autenticação interativa
 - `auth`: inicia o fluxo de login. Informe email e senha (campo de senha é mascarado). Sucesso limpa o terminal e mostra `Welcome to your future brain, @username`.
