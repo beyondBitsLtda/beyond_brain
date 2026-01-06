@@ -212,13 +212,13 @@ export function authCommand(bus) {
         throw error;
       }
 
-      const user = data?.user;
-      if (!user) {
-        throw new Error("Registro criado, mas usuário não retornado. Verifique confirmação de email.");
+      const ensuredUser = await ensureSessionUser(client, email, password, data?.user);
+      if (!ensuredUser) {
+        throw new Error("Registro criado, mas nenhuma sessão foi encontrada. Tente autenticar-se novamente.");
       }
 
       const { profile, error: profileError } = await createProfile(client, {
-        userId: user.id,
+        userId: ensuredUser.id,
         username,
       });
 
@@ -226,8 +226,7 @@ export function authCommand(bus) {
         throw profileError;
       }
 
-      const sessionUser = data.session?.user ?? user;
-      setSession(sessionUser, profile ?? null);
+      setSession(ensuredUser, profile ?? null);
       finishCapture(bus);
       bus.emit("output:clear", "");
       const displayName = getUsernameFallback();
@@ -244,6 +243,24 @@ export function authCommand(bus) {
       startRegisterFlow(client);
     }
   }
+}
+
+async function ensureSessionUser(client, email, password, fallbackUser = null) {
+  const { data: sessionData } = await client.auth.getSession();
+  if (sessionData?.session?.user) {
+    return sessionData.session.user;
+  }
+
+  const { data: signInData, error: signInError } = await client.auth.signInWithPassword({
+    email,
+    password,
+  });
+
+  if (!signInError && (signInData?.user || signInData?.session?.user)) {
+    return signInData.user ?? signInData.session.user;
+  }
+
+  return fallbackUser ?? null;
 }
 
 export async function bootstrapSession(bus) {
