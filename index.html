@@ -12,15 +12,16 @@
     <main class="terminal__screen" id="output" aria-live="polite"></main>
     <form class="terminal__input-row" id="command-form" autocomplete="off">
       <span class="terminal__prompt">&gt;</span>
-      <input
+      <span id="typedText" class="terminal__typed" aria-hidden="true"></span>
+      <textarea
         id="command-input"
         name="command"
-        type="text"
+        rows="1"
         autofocus
         autocomplete="off"
         spellcheck="false"
         aria-label="Digite um comando"
-      />
+      ></textarea>
       <span class="terminal__cursor" aria-hidden="true"></span>
     </form>
   </div>
