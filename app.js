@@ -1,5 +1,6 @@
 import { createEventBus } from "./eventBus.js";
 import { createTerminalUI } from "./terminalUI.js";
+import { createGraphUI } from "./graphUI.js";
 import { createCommandRouter } from "./commandRouter.js";
 import { helpCommand } from "./commands/help.js";
 import { clearCommand } from "./commands/clear.js";
@@ -14,11 +15,13 @@ import {
   selectNoteCommand,
   updateNoteCommand,
 } from "./commands/notes.js";
+import { graphCommand } from "./commands/graph.js";
 
 const bus = createEventBus();
 
 const ui = createTerminalUI(bus);
 ui.showIntro();
+createGraphUI(bus);
 
 const commands = {
   help: helpCommand(bus),
@@ -40,6 +43,7 @@ const commands = {
   update: updateNoteCommand(bus),
   DELETE: deleteNoteCommand(bus),
   delete: deleteNoteCommand(bus),
+  graph: graphCommand(bus),
 };
 
 createCommandRouter(bus, commands);
