@@ -119,6 +119,7 @@ export function linkCommand(bus) {
     }
 
     bus.emit("output:append", `Relação criada: (${type}) ${from} -> ${to}`);
+    bus.emit("graph:refresh");
   };
 }
 
@@ -165,6 +166,7 @@ export function unlinkCommand(bus) {
     }
 
     bus.emit("output:append", `Relação removida (${data.length}).`);
+    bus.emit("graph:refresh");
   };
 }
 
