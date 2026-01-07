@@ -2,6 +2,7 @@ import { createEventBus } from "./eventBus.js";
 import { createTerminalUI } from "./terminalUI.js";
 import { createGraphUI } from "./graphUI.js";
 import { createCommandRouter } from "./commandRouter.js";
+import { createFocusManager } from "./focusManager.js";
 import { helpCommand } from "./commands/help.js";
 import { clearCommand } from "./commands/clear.js";
 import { pingCommand } from "./commands/ping.js";
@@ -19,12 +20,14 @@ import { graphCommand } from "./commands/graph.js";
 import { resetBrainCommand } from "./commands/resetBrain.js";
 import { nowCommand } from "./commands/now.js";
 import { lastCommand } from "./commands/last.js";
+import { focusCommand } from "./commands/focus.js";
 
 const bus = createEventBus();
+const focusManager = createFocusManager(bus);
 
 const ui = createTerminalUI(bus);
 ui.showIntro();
-createGraphUI(bus);
+createGraphUI(bus, focusManager);
 
 const commands = {
   help: helpCommand(bus),
@@ -40,8 +43,8 @@ const commands = {
   rels: relsCommand(bus),
   INSERT: insertNoteCommand(bus),
   insert: insertNoteCommand(bus),
-  SELECT: selectNoteCommand(bus),
-  select: selectNoteCommand(bus),
+  SELECT: selectNoteCommand(bus, focusManager),
+  select: selectNoteCommand(bus, focusManager),
   UPDATE: updateNoteCommand(bus),
   update: updateNoteCommand(bus),
   DELETE: deleteNoteCommand(bus),
@@ -51,6 +54,8 @@ const commands = {
   last: lastCommand(bus),
   LAST: lastCommand(bus),
   graph: graphCommand(bus),
+  focus: focusCommand(bus, focusManager),
+  FOCUS: focusCommand(bus, focusManager),
   RESET: resetBrainCommand(bus),
   reset: resetBrainCommand(bus),
   NUKE: resetBrainCommand(bus),
