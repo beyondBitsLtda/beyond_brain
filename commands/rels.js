@@ -53,7 +53,7 @@ async function ensureOwnedNotes(client, userId, noteIds) {
 }
 
 function formatRelation(rel) {
-  return `- (${rel.type}) ${rel.from} -> ${rel.to}`;
+  return `- (${rel.type}) ${rel.from_note_id} -> ${rel.to_note_id}`;
 }
 
 export function linkCommand(bus) {
@@ -90,17 +90,17 @@ export function linkCommand(bus) {
     }
 
     const { data: existing, error: existingError } = await client
-      .from("note_links")
+      .from("note_relations")
       .select("id")
-      .eq("from", from)
-      .eq("to", to)
+      .eq("from_note_id", from)
+      .eq("to_note_id", to)
       .eq("type", type)
       .eq("user_id", user.id)
       .limit(1)
       .maybeSingle();
 
     if (existingError) {
-      bus.emit("output:append", `Erro ao verificar relação na note_links: ${existingError.message}`);
+      bus.emit("output:append", `Erro ao verificar relação na note_relations: ${existingError.message}`);
       return;
     }
 
@@ -110,11 +110,15 @@ export function linkCommand(bus) {
     }
 
     const { error: insertError } = await client
-      .from("note_links")
-      .insert({ from, to, type, user_id: user.id });
+      .from("note_relations")
+      .insert({ from_note_id: from, to_note_id: to, type, user_id: user.id });
 
     if (insertError) {
-      bus.emit("output:append", `Erro ao criar relação na note_links: ${insertError.message}`);
+      if (insertError.code === "23505") {
+        bus.emit("output:append", "Essa relação já existe.");
+        return;
+      }
+      bus.emit("output:append", `Erro ao criar relação na note_relations: ${insertError.message}`);
       return;
     }
 
@@ -145,10 +149,10 @@ export function unlinkCommand(bus) {
     }
 
     let query = client
-      .from("note_links")
+      .from("note_relations")
       .delete()
-      .eq("from", from)
-      .eq("to", to)
+      .eq("from_note_id", from)
+      .eq("to_note_id", to)
       .eq("user_id", user.id);
     if (type) {
       query = query.eq("type", type);
@@ -156,7 +160,7 @@ export function unlinkCommand(bus) {
 
     const { data, error: deleteError } = await query.select("id");
     if (deleteError) {
-      bus.emit("output:append", `Erro ao remover relação na note_links: ${deleteError.message}`);
+      bus.emit("output:append", `Erro ao remover relação na note_relations: ${deleteError.message}`);
       return;
     }
 
@@ -195,14 +199,14 @@ export function relsCommand(bus) {
       }
 
       const { data, error: relError } = await client
-        .from("note_links")
-        .select("from,to,type,created_at")
+        .from("note_relations")
+        .select("from_note_id,to_note_id,type")
         .eq("user_id", user.id)
-        .or(`from.eq.${noteId},to.eq.${noteId}`)
-        .order("created_at", { ascending: false });
+        .or(`from_note_id.eq.${noteId},to_note_id.eq.${noteId}`)
+        .order("id", { ascending: false });
 
       if (relError) {
-        bus.emit("output:append", `Erro ao listar relações na note_links: ${relError.message}`);
+        bus.emit("output:append", `Erro ao listar relações na note_relations: ${relError.message}`);
         return;
       }
 
@@ -212,7 +216,7 @@ export function relsCommand(bus) {
       }
 
       const lines = data.map((rel) => {
-        const other = rel.from === noteId ? rel.to : rel.from;
+        const other = rel.from_note_id === noteId ? rel.to_note_id : rel.from_note_id;
         return `- (${rel.type}) ${other}`;
       });
 
@@ -222,13 +226,13 @@ export function relsCommand(bus) {
     }
 
     const { data, error: relError } = await client
-      .from("note_links")
-      .select("from,to,type,created_at")
+      .from("note_relations")
+      .select("from_note_id,to_note_id,type")
       .eq("user_id", user.id)
-      .order("created_at", { ascending: false });
+      .order("id", { ascending: false });
 
     if (relError) {
-      bus.emit("output:append", `Erro ao listar relações na note_links: ${relError.message}`);
+      bus.emit("output:append", `Erro ao listar relações na note_relations: ${relError.message}`);
       return;
     }
 

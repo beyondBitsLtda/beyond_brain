@@ -25,8 +25,8 @@ function buildSubgraph(noteId, depth, relations) {
   for (let level = 0; level < depth; level += 1) {
     const nextFrontier = new Set();
     relations.forEach((rel) => {
-      const from = rel.from;
-      const to = rel.to;
+      const from = rel.from_note_id;
+      const to = rel.to_note_id;
       if (frontier.has(from)) {
         nextFrontier.add(to);
       }
@@ -56,12 +56,12 @@ function mapElements(notes, relations, allowedIds) {
     }));
 
   const edges = relations
-    .filter((rel) => noteSet.has(rel.from) && noteSet.has(rel.to))
+    .filter((rel) => noteSet.has(rel.from_note_id) && noteSet.has(rel.to_note_id))
     .map((rel) => ({
       data: {
-        id: `${rel.from}-${rel.to}-${rel.type}`,
-        source: rel.from,
-        target: rel.to,
+        id: `${rel.from_note_id}-${rel.to_note_id}-${rel.type}`,
+        source: rel.from_note_id,
+        target: rel.to_note_id,
         type: rel.type ?? "",
       },
     }));
@@ -191,8 +191,8 @@ export function createGraphUI(bus) {
         .eq("user_id", user.id)
         .order("created_at", { ascending: false }),
       clientResponse.client
-        .from("note_links")
-        .select("from,to,type")
+        .from("note_relations")
+        .select("from_note_id,to_note_id,type")
         .eq("user_id", user.id),
     ]);
 
@@ -201,7 +201,7 @@ export function createGraphUI(bus) {
       return;
     }
     if (relsResponse.error) {
-      bus.emit("output:append", `Erro ao carregar relações na note_links: ${relsResponse.error.message}`);
+      bus.emit("output:append", `Erro ao carregar relações na note_relations: ${relsResponse.error.message}`);
       return;
     }
 
