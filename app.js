@@ -18,6 +18,7 @@ import {
 import { graphCommand } from "./commands/graph.js";
 import { resetBrainCommand } from "./commands/resetBrain.js";
 import { nowCommand } from "./commands/now.js";
+import { lastCommand } from "./commands/last.js";
 
 const bus = createEventBus();
 
@@ -47,6 +48,8 @@ const commands = {
   delete: deleteNoteCommand(bus),
   now: nowCommand(bus),
   NOW: nowCommand(bus),
+  last: lastCommand(bus),
+  LAST: lastCommand(bus),
   graph: graphCommand(bus),
   RESET: resetBrainCommand(bus),
   reset: resetBrainCommand(bus),
