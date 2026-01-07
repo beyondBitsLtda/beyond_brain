@@ -4,7 +4,11 @@ const HELP_TEXT = `Comandos disponíveis:
 - ping: testa a conexão com o Supabase
 - auth: faz login interativo (auth --register para criar conta)
 - logout: encerra a sessão atual
-- whoami: mostra o usuário autenticado`;
+- whoami: mostra o usuário autenticado
+- LINK from="uuid" to="uuid" type="...": cria uma relação entre notas
+- UNLINK from="uuid" to="uuid": remove relação entre notas
+- rels: lista todas as relações do usuário
+- rels note "uuid": lista relações de uma nota específica`;
 
 export function helpCommand(bus) {
   return () => {
