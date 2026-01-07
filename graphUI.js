@@ -191,7 +191,7 @@ export function createGraphUI(bus) {
         .eq("user_id", user.id)
         .order("created_at", { ascending: false }),
       clientResponse.client
-        .from("note_relations")
+        .from("note_links")
         .select("from,to,type")
         .eq("user_id", user.id),
     ]);
@@ -201,7 +201,7 @@ export function createGraphUI(bus) {
       return;
     }
     if (relsResponse.error) {
-      bus.emit("output:append", `Erro ao carregar relações: ${relsResponse.error.message}`);
+      bus.emit("output:append", `Erro ao carregar relações na note_links: ${relsResponse.error.message}`);
       return;
     }
 
