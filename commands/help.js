@@ -6,6 +6,7 @@ const HELP_TEXT = `Comandos disponíveis:
 - logout: encerra a sessão atual
 - whoami: mostra o usuário autenticado
 - now "texto..." | now subject="..." body="...": cria nota rápida
+- last: mostra a última nota criada pelo usuário
 - INSERT NOTE subject="..." moment="..." body="..." [ref="..."]: cria uma nota
 - SELECT NOTE [FIELDS(...)] [WHERE ...] [LIMIT n]: lista notas
 - UPDATE NOTE id="..." SET field="...": atualiza nota
