@@ -20,7 +20,7 @@ body {
 }
 
 .terminal {
-  width: min(90vw, 720px);
+  width: min(1200px, 96vw);
   border: 1px solid #0f0;
   padding: 1.5rem;
   background: #000;
@@ -35,8 +35,8 @@ body {
 }
 
 .terminal__screen {
-  min-height: 280px;
-  max-height: 50vh;
+  min-height: 60vh;
+  max-height: 72vh;
   overflow-y: auto;
   padding: 0.5rem;
   border: 1px solid #0f0;
@@ -53,8 +53,9 @@ body {
 }
 
 .terminal__input-row {
+  position: relative;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 0.5rem;
   border: 1px solid #0f0;
   padding: 0.5rem;
@@ -64,14 +65,26 @@ body {
   font-weight: 700;
 }
 
-#command-input {
+.terminal__typed {
   flex: 1;
+  white-space: pre-wrap;
+  word-break: break-word;
+  min-height: 1.2em;
+}
+
+#command-input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  resize: none;
   background: transparent;
-  color: #0f0;
+  color: transparent;
   border: none;
   outline: none;
   font: inherit;
-  caret-color: #0f0;
+  caret-color: transparent;
+  opacity: 0;
 }
 
 .terminal__cursor {
@@ -79,6 +92,7 @@ body {
   height: 1.2em;
   background: #0f0;
   animation: blink 1s steps(1) infinite;
+  align-self: flex-start;
 }
 
 @keyframes blink {
