@@ -7,6 +7,7 @@ import { pingCommand } from "./commands/ping.js";
 import { authCommand, bootstrapSession } from "./commands/auth.js";
 import { logoutCommand } from "./commands/logout.js";
 import { whoamiCommand } from "./commands/whoami.js";
+import { linkCommand, relsCommand, unlinkCommand } from "./commands/rels.js";
 
 const bus = createEventBus();
 
@@ -20,6 +21,11 @@ const commands = {
   auth: authCommand({ bus }),
   logout: logoutCommand(bus),
   whoami: whoamiCommand(bus),
+  LINK: linkCommand(bus),
+  link: linkCommand(bus),
+  UNLINK: unlinkCommand(bus),
+  unlink: unlinkCommand(bus),
+  rels: relsCommand(bus),
 };
 
 createCommandRouter(bus, commands);
