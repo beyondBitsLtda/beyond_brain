@@ -8,6 +8,12 @@ import { authCommand, bootstrapSession } from "./commands/auth.js";
 import { logoutCommand } from "./commands/logout.js";
 import { whoamiCommand } from "./commands/whoami.js";
 import { linkCommand, relsCommand, unlinkCommand } from "./commands/rels.js";
+import {
+  deleteNoteCommand,
+  insertNoteCommand,
+  selectNoteCommand,
+  updateNoteCommand,
+} from "./commands/notes.js";
 
 const bus = createEventBus();
 
@@ -26,6 +32,14 @@ const commands = {
   UNLINK: unlinkCommand(bus),
   unlink: unlinkCommand(bus),
   rels: relsCommand(bus),
+  INSERT: insertNoteCommand(bus),
+  insert: insertNoteCommand(bus),
+  SELECT: selectNoteCommand(bus),
+  select: selectNoteCommand(bus),
+  UPDATE: updateNoteCommand(bus),
+  update: updateNoteCommand(bus),
+  DELETE: deleteNoteCommand(bus),
+  delete: deleteNoteCommand(bus),
 };
 
 createCommandRouter(bus, commands);
