@@ -17,6 +17,7 @@ const HELP_TEXT = `Comandos disponíveis:
 - rels note "uuid": lista relações de uma nota específica
 - graph: alterna o grafo das notas
 - graph note "uuid" [1|2]: foca no subgrafo da nota
+- focus "uuid" | focus clear: define ou limpa o modo foco
 - RESET BRAIN: remove todas as notas e relações do usuário (NUKE BRAIN também funciona)`;
 
 export function helpCommand(bus) {

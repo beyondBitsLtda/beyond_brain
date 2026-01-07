@@ -251,7 +251,7 @@ export function insertNoteCommand(bus) {
   };
 }
 
-export function selectNoteCommand(bus) {
+export function selectNoteCommand(bus, focusManager) {
   return async ({ raw = "" } = {}) => {
     if (!ensureNoteKeyword(bus, raw, "SELECT")) return;
 
@@ -271,6 +271,14 @@ export function selectNoteCommand(bus) {
     if (whereError) {
       bus.emit("output:append", whereError);
       return;
+    }
+
+    if (conditions.length === 0) {
+      const focusId = focusManager?.getFocusNoteId?.();
+      if (focusId) {
+        const focusSubject = focusManager?.getFocusSubject?.() ?? "sem assunto";
+        bus.emit("output:append", `Focus ativo: ${focusSubject} (${focusId}).`);
+      }
     }
 
     let query = client

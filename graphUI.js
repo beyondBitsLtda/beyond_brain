@@ -69,7 +69,7 @@ function mapElements(notes, relations, allowedIds) {
   return { nodes, edges };
 }
 
-export function createGraphUI(bus) {
+export function createGraphUI(bus, focusManager) {
   const overlay = document.getElementById("graph-overlay");
   const canvas = document.getElementById("graph-canvas");
   const emptyState = document.getElementById("graph-empty");
@@ -177,7 +177,13 @@ export function createGraphUI(bus) {
 
   async function loadGraph(options = {}) {
     if (!isOpen) return;
-    const focusNoteId = options.focusNoteId ?? lastOptions.focusNoteId;
+    const fallbackFocus = focusManager?.getFocusNoteId?.() ?? null;
+    let focusNoteId = lastOptions.focusNoteId;
+    if (Object.prototype.hasOwnProperty.call(options, "focusNoteId")) {
+      focusNoteId = options.focusNoteId;
+    } else if (fallbackFocus) {
+      focusNoteId = fallbackFocus;
+    }
     const depth = parseDepth(options.depth ?? lastOptions.depth);
     lastOptions = { focusNoteId, depth };
 
@@ -267,7 +273,7 @@ export function createGraphUI(bus) {
       closeGraph();
       return;
     }
-    lastOptions = { focusNoteId: null, depth: DEPTH_MIN };
+    lastOptions = { focusNoteId: focusManager?.getFocusNoteId?.() ?? null, depth: DEPTH_MIN };
     openGraph(lastOptions);
   }
 
@@ -276,6 +282,10 @@ export function createGraphUI(bus) {
     openGraph(options);
   });
   bus.on("graph:refresh", () => loadGraph());
+  bus.on("focus:changed", () => {
+    if (!isOpen) return;
+    loadGraph({ focusNoteId: focusManager?.getFocusNoteId?.() ?? null });
+  });
 
   return { toggleGraph, openGraph, closeGraph, loadGraph };
 }
