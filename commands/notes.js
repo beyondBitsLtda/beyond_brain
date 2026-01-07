@@ -4,6 +4,7 @@ import { clearSession } from "../sessionStore.js";
 const MAX_BODY_LENGTH = 300;
 const NOTE_FIELDS = ["id", "subject", "moment", "body", "ref", "created_at"];
 const UPDATE_FIELDS = ["subject", "moment", "body", "ref"];
+const TABLE_MAX_WIDTH = 40;
 
 function parseKeyValuePairs(raw) {
   const pairs = {};
@@ -71,26 +72,57 @@ function parseWhereClause(raw) {
   return { conditions };
 }
 
-function formatTable(rows, fields) {
+function formatDateTime(value) {
+  if (!value) return "";
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  const pad = (val) => String(val).padStart(2, "0");
+  return [
+    `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`,
+    `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`,
+  ].join(" ");
+}
+
+function normalizeCellValue(value, field) {
+  if (value === null || value === undefined) return "";
+  if (field === "created_at") {
+    return formatDateTime(value);
+  }
+  if (value instanceof Date) {
+    return formatDateTime(value);
+  }
+  return String(value);
+}
+
+function truncateCell(value, width) {
+  if (value.length <= width) return value;
+  if (width <= 3) return value.slice(0, width);
+  return `${value.slice(0, width - 3)}...`;
+}
+
+function formatTableSQLServer(rows, fields, maxWidth = TABLE_MAX_WIDTH) {
   const widths = fields.map((field) => field.length);
   rows.forEach((row) => {
     fields.forEach((field, index) => {
-      const value = row[field] ?? "";
-      widths[index] = Math.max(widths[index], String(value).length);
+      const value = normalizeCellValue(row[field], field);
+      widths[index] = Math.max(widths[index], value.length);
     });
   });
 
-  const header = fields
-    .map((field, index) => field.padEnd(widths[index]))
-    .join(" | ");
-  const divider = widths.map((width) => "-".repeat(width)).join("-+-");
-  const lines = rows.map((row) =>
-    fields
-      .map((field, index) => String(row[field] ?? "").padEnd(widths[index]))
-      .join(" | ")
+  const finalWidths = widths.map((width) => Math.min(maxWidth, width));
+  const border = `+${finalWidths.map((width) => "-".repeat(width + 2)).join("+")}+`;
+
+  const formatRow = (values) =>
+    `| ${values
+      .map((value, index) => truncateCell(value, finalWidths[index]).padEnd(finalWidths[index]))
+      .join(" | ")} |`;
+
+  const header = formatRow(fields);
+  const dataRows = rows.map((row) =>
+    formatRow(fields.map((field) => normalizeCellValue(row[field], field)))
   );
 
-  return [header, divider, ...lines];
+  return [border, header, border, ...dataRows, border];
 }
 
 async function getAuthenticatedUser(bus, client) {
@@ -266,7 +298,7 @@ export function selectNoteCommand(bus) {
       return;
     }
 
-    formatTable(data, requestedFields).forEach((line) => bus.emit("output:append", line));
+    formatTableSQLServer(data, requestedFields).forEach((line) => bus.emit("output:append", line));
   };
 }
 

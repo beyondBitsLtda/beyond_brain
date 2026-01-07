@@ -84,6 +84,12 @@ export function createGraphUI(bus) {
   let isOpen = false;
   let lastOptions = { focusNoteId: null, depth: DEPTH_MIN };
 
+  overlay.addEventListener("pointerdown", (event) => {
+    if (event.target.closest(".graph-panel")) {
+      setTimeout(() => bus.emit("input:focus"), 0);
+    }
+  });
+
   function showDetails(data) {
     detailId.textContent = data.id ?? "";
     detailSubject.textContent = data.subject ?? "";
@@ -247,6 +253,7 @@ export function createGraphUI(bus) {
   function openGraph(options = {}) {
     overlay.hidden = false;
     isOpen = true;
+    bus.emit("input:focus");
     loadGraph(options);
   }
 
