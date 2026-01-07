@@ -90,7 +90,7 @@ export function linkCommand(bus) {
     }
 
     const { data: existing, error: existingError } = await client
-      .from("relations")
+      .from("note_relations")
       .select("id")
       .eq("from", from)
       .eq("to", to)
@@ -110,7 +110,7 @@ export function linkCommand(bus) {
     }
 
     const { error: insertError } = await client
-      .from("relations")
+      .from("note_relations")
       .insert({ from, to, type, user_id: user.id });
 
     if (insertError) {
@@ -145,7 +145,7 @@ export function unlinkCommand(bus) {
     }
 
     let query = client
-      .from("relations")
+      .from("note_relations")
       .delete()
       .eq("from", from)
       .eq("to", to)
@@ -195,7 +195,7 @@ export function relsCommand(bus) {
       }
 
       const { data, error: relError } = await client
-        .from("relations")
+        .from("note_relations")
         .select("from,to,type,created_at")
         .eq("user_id", user.id)
         .or(`from.eq.${noteId},to.eq.${noteId}`)
@@ -222,7 +222,7 @@ export function relsCommand(bus) {
     }
 
     const { data, error: relError } = await client
-      .from("relations")
+      .from("note_relations")
       .select("from,to,type,created_at")
       .eq("user_id", user.id)
       .order("created_at", { ascending: false });

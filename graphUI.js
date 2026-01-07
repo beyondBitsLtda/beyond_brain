@@ -191,7 +191,7 @@ export function createGraphUI(bus) {
         .eq("user_id", user.id)
         .order("created_at", { ascending: false }),
       clientResponse.client
-        .from("relations")
+        .from("note_relations")
         .select("from,to,type")
         .eq("user_id", user.id),
     ]);
