@@ -25,6 +25,35 @@
       <span class="terminal__cursor" aria-hidden="true"></span>
     </form>
   </div>
+  <section class="graph-overlay" id="graph-overlay" hidden>
+    <div class="graph-panel" role="dialog" aria-label="Grafo de notas">
+      <header class="graph-panel__header">
+        <span>GRAFO</span>
+        <span class="graph-panel__hint">Digite "graph" para fechar</span>
+      </header>
+      <div class="graph-panel__body">
+        <div class="graph-canvas">
+          <div class="graph-empty" id="graph-empty">Nenhuma nota para exibir.</div>
+          <div class="graph-canvas__inner" id="graph-canvas"></div>
+        </div>
+        <aside class="graph-detail" id="graph-detail">
+          <h3>Detalhes</h3>
+          <p class="graph-detail__empty" id="graph-detail-empty">Clique em um node para ver detalhes.</p>
+          <dl class="graph-detail__list" id="graph-detail-list" hidden>
+            <dt>ID</dt>
+            <dd id="graph-detail-id"></dd>
+            <dt>Subject</dt>
+            <dd id="graph-detail-subject"></dd>
+            <dt>Moment</dt>
+            <dd id="graph-detail-moment"></dd>
+            <dt>Created at</dt>
+            <dd id="graph-detail-created"></dd>
+          </dl>
+        </aside>
+      </div>
+    </div>
+  </section>
+  <script src="https://unpkg.com/cytoscape@3.26.0/dist/cytoscape.min.js"></script>
   <script type="module" src="app.js"></script>
 </body>
 </html>

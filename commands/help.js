@@ -12,7 +12,9 @@ const HELP_TEXT = `Comandos disponíveis:
 - LINK from="uuid" to="uuid" type="...": cria uma relação entre notas
 - UNLINK from="uuid" to="uuid": remove relação entre notas
 - rels: lista todas as relações do usuário
-- rels note "uuid": lista relações de uma nota específica`;
+- rels note "uuid": lista relações de uma nota específica
+- graph: alterna o grafo das notas
+- graph note "uuid" [1|2]: foca no subgrafo da nota`;
 
 export function helpCommand(bus) {
   return () => {
