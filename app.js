@@ -16,6 +16,7 @@ import {
   updateNoteCommand,
 } from "./commands/notes.js";
 import { graphCommand } from "./commands/graph.js";
+import { resetBrainCommand } from "./commands/resetBrain.js";
 
 const bus = createEventBus();
 
@@ -44,6 +45,10 @@ const commands = {
   DELETE: deleteNoteCommand(bus),
   delete: deleteNoteCommand(bus),
   graph: graphCommand(bus),
+  RESET: resetBrainCommand(bus),
+  reset: resetBrainCommand(bus),
+  NUKE: resetBrainCommand(bus),
+  nuke: resetBrainCommand(bus),
 };
 
 createCommandRouter(bus, commands);
