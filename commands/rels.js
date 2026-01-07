@@ -90,7 +90,7 @@ export function linkCommand(bus) {
     }
 
     const { data: existing, error: existingError } = await client
-      .from("note_links")
+      .from("note_relations")
       .select("id")
       .eq("from", from)
       .eq("to", to)
@@ -100,7 +100,7 @@ export function linkCommand(bus) {
       .maybeSingle();
 
     if (existingError) {
-      bus.emit("output:append", `Erro ao verificar relação na note_links: ${existingError.message}`);
+      bus.emit("output:append", `Erro ao verificar relação na note_relations: ${existingError.message}`);
       return;
     }
 
@@ -110,11 +110,11 @@ export function linkCommand(bus) {
     }
 
     const { error: insertError } = await client
-      .from("note_links")
+      .from("note_relations")
       .insert({ from, to, type, user_id: user.id });
 
     if (insertError) {
-      bus.emit("output:append", `Erro ao criar relação na note_links: ${insertError.message}`);
+      bus.emit("output:append", `Erro ao criar relação na note_relations: ${insertError.message}`);
       return;
     }
 
@@ -145,7 +145,7 @@ export function unlinkCommand(bus) {
     }
 
     let query = client
-      .from("note_links")
+      .from("note_relations")
       .delete()
       .eq("from", from)
       .eq("to", to)
@@ -156,7 +156,7 @@ export function unlinkCommand(bus) {
 
     const { data, error: deleteError } = await query.select("id");
     if (deleteError) {
-      bus.emit("output:append", `Erro ao remover relação na note_links: ${deleteError.message}`);
+      bus.emit("output:append", `Erro ao remover relação na note_relations: ${deleteError.message}`);
       return;
     }
 
@@ -195,14 +195,14 @@ export function relsCommand(bus) {
       }
 
       const { data, error: relError } = await client
-        .from("note_links")
+        .from("note_relations")
         .select("from,to,type,created_at")
         .eq("user_id", user.id)
         .or(`from.eq.${noteId},to.eq.${noteId}`)
         .order("created_at", { ascending: false });
 
       if (relError) {
-        bus.emit("output:append", `Erro ao listar relações na note_links: ${relError.message}`);
+        bus.emit("output:append", `Erro ao listar relações na note_relations: ${relError.message}`);
         return;
       }
 
@@ -222,13 +222,13 @@ export function relsCommand(bus) {
     }
 
     const { data, error: relError } = await client
-      .from("note_links")
+      .from("note_relations")
       .select("from,to,type,created_at")
       .eq("user_id", user.id)
       .order("created_at", { ascending: false });
 
     if (relError) {
-      bus.emit("output:append", `Erro ao listar relações na note_links: ${relError.message}`);
+      bus.emit("output:append", `Erro ao listar relações na note_relations: ${relError.message}`);
       return;
     }
 
