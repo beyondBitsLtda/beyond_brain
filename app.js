@@ -27,6 +27,7 @@ import { createPetManager } from "./petManager.js";
 import { petCommand } from "./commands/pet.js";
 import { steveCommand } from "./commands/steve.js";
 import { starCommand } from "./commands/star.js";
+import { xpCommand } from "./commands/xp.js";
 
 const bus = createEventBus();
 const focusManager = createFocusManager(bus);
@@ -72,6 +73,7 @@ const commands = {
   pet: petCommand(bus, petManager),
   steve: steveCommand(bus),
   star: starCommand(bus),
+  xp: xpCommand(bus),
 };
 
 createCommandRouter(bus, commands);
