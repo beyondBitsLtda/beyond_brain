@@ -10,50 +10,50 @@
   <div class="terminal">
     <header class="terminal__header">BEYOND BRAIN</header>
     <div class="terminal__body">
-      <main class="terminal__screen" id="output" aria-live="polite"></main>
-      <section class="graph-overlay" id="graph-overlay" hidden>
-        <div class="graph-panel" role="dialog" aria-label="Grafo de notas">
-          <header class="graph-panel__header">
-            <span>GRAFO</span>
-            <span class="graph-panel__hint">Digite "graph" para fechar</span>
-          </header>
-          <div class="graph-panel__body">
-            <div class="graph-canvas">
-              <div class="graph-empty" id="graph-empty">Nenhuma nota para exibir.</div>
-              <div class="graph-canvas__inner" id="graph-canvas"></div>
+      <div class="terminal__output-area">
+        <main class="terminal__screen" id="output" aria-live="polite"></main>
+        <section class="graph-overlay" id="graph-overlay" hidden>
+          <div class="graph-panel" role="dialog" aria-label="Grafo de notas">
+            <header class="graph-panel__header">
+              <span>GRAFO</span>
+              <span class="graph-panel__hint">Digite "graph" para fechar</span>
+            </header>
+            <div class="graph-panel__body">
+              <div class="graph-canvas">
+                <div class="graph-empty" id="graph-empty">Nenhuma nota para exibir.</div>
+                <div class="graph-canvas__inner" id="graph-canvas"></div>
+              </div>
+              <aside class="graph-detail" id="graph-detail">
+                <h3>Detalhes</h3>
+                <p class="graph-detail__empty" id="graph-detail-empty">Clique em um node para ver detalhes.</p>
+                <dl class="graph-detail__list" id="graph-detail-list" hidden>
+                  <dt>ID</dt>
+                  <dd id="graph-detail-id"></dd>
+                  <dt>Subject</dt>
+                  <dd id="graph-detail-subject"></dd>
+                  <dt>Moment</dt>
+                  <dd id="graph-detail-moment"></dd>
+                  <dt>Created at</dt>
+                  <dd id="graph-detail-created"></dd>
+                </dl>
+              </aside>
             </div>
-            <aside class="graph-detail" id="graph-detail">
-              <h3>Detalhes</h3>
-              <p class="graph-detail__empty" id="graph-detail-empty">Clique em um node para ver detalhes.</p>
-              <dl class="graph-detail__list" id="graph-detail-list" hidden>
-                <dt>ID</dt>
-                <dd id="graph-detail-id"></dd>
-                <dt>Subject</dt>
-                <dd id="graph-detail-subject"></dd>
-                <dt>Moment</dt>
-                <dd id="graph-detail-moment"></dd>
-                <dt>Created at</dt>
-                <dd id="graph-detail-created"></dd>
-              </dl>
-            </aside>
           </div>
-        </div>
-      </section>
+        </section>
+      </div>
+      <form class="terminal__input-row" id="command-form" autocomplete="off">
+        <span class="terminal__prompt">&gt;</span>
+        <input
+          id="command-input"
+          name="command"
+          type="text"
+          autofocus
+          autocomplete="off"
+          spellcheck="false"
+          aria-label="Digite um comando"
+        >
+      </form>
     </div>
-    <form class="terminal__input-row" id="command-form" autocomplete="off">
-      <span class="terminal__prompt">&gt;</span>
-      <span id="typedText" class="terminal__typed" aria-hidden="true"></span>
-      <textarea
-        id="command-input"
-        name="command"
-        rows="1"
-        autofocus
-        autocomplete="off"
-        spellcheck="false"
-        aria-label="Digite um comando"
-      ></textarea>
-      <span class="terminal__cursor" aria-hidden="true"></span>
-    </form>
   </div>
   <script src="https://unpkg.com/cytoscape@3.26.0/dist/cytoscape.min.js"></script>
   <script type="module" src="app.js"></script>
