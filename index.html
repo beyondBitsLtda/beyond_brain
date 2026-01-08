@@ -8,7 +8,14 @@
 </head>
 <body>
   <div class="terminal">
-    <header class="terminal__header">BEYOND BRAIN</header>
+    <header class="terminal__header">
+      <span class="terminal__title">BEYOND BRAIN</span>
+      <span class="terminal__controls" aria-hidden="true">
+        <span class="terminal__control terminal__control--minimize"></span>
+        <span class="terminal__control terminal__control--maximize"></span>
+        <span class="terminal__control terminal__control--close"></span>
+      </span>
+    </header>
     <div class="terminal__body">
       <main class="terminal__screen" id="output" aria-live="polite"></main>
       <section class="graph-overlay" id="graph-overlay" hidden>
