@@ -372,12 +372,29 @@ export function createPetManager(bus) {
     session.wiseTurnsLeft = 2;
   }
 
+  function isBarePetCommand(trimmed, commandLower) {
+    if (!trimmed) return false;
+    if (trimmed.startsWith("/")) return false;
+    if (!commandLower) return false;
+    if (commandLower === "name") {
+      return trimmed === commandLower || trimmed.startsWith(`${commandLower} `);
+    }
+    return trimmed === commandLower;
+  }
+
   function handlePetLine(line) {
     const trimmed = line.trim();
-    if (trimmed.startsWith("/")) {
-      const [command, ...rest] = trimmed.slice(1).split(/\s+/);
-      const commandLower = command.toLowerCase();
-      const remainder = rest.join(" ");
+    const hasSlashPrefix = trimmed.startsWith("/");
+    const normalized = hasSlashPrefix ? trimmed.slice(1).trim() : trimmed;
+    const [command = "", ...rest] = normalized.split(/\s+/);
+    const commandLower = command.toLowerCase();
+    const remainder = rest.join(" ");
+
+    if (hasSlashPrefix || isBarePetCommand(trimmed, commandLower)) {
+      if (!commandLower) {
+        bus.emit("output:append", "Comando do pet não reconhecido. Use /help.");
+        return;
+      }
 
       if (commandLower === "exit") {
         exitPetMode();
