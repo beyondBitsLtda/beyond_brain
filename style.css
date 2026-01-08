@@ -71,7 +71,7 @@ body {
   font-weight: 700;
 }
 
-#command-input {
+.terminal__typed {
   flex: 1;
   background: transparent;
   border: none;
