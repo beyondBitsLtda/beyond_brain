@@ -43,16 +43,15 @@
       </div>
       <form class="terminal__input-row" id="command-form" autocomplete="off">
         <span class="terminal__prompt">&gt;</span>
-        <span id="typedText" class="terminal__typed" aria-hidden="true"></span>
-        <textarea
+        <input
           id="command-input"
           name="command"
-          rows="1"
+          type="text"
           autofocus
           autocomplete="off"
           spellcheck="false"
           aria-label="Digite um comando"
-        ></textarea>
+        >
       </form>
     </div>
   </div>
