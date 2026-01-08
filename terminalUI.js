@@ -7,8 +7,9 @@ export function createTerminalUI(bus) {
   const output = document.getElementById("output");
   const form = document.getElementById("command-form");
   const input = document.getElementById("command-input");
-  const typedText = document.getElementById("typedText");
-  let isMasked = false;
+  const history = [];
+  let historyIndex = null;
+  let draftValue = "";
 
   function appendLine(text) {
     const line = document.createElement("div");
@@ -22,30 +23,59 @@ export function createTerminalUI(bus) {
     output.innerHTML = "";
   }
 
-  function updateMirror() {
-    const raw = input.value;
-    if (isMasked) {
-      typedText.textContent = raw.replace(/[^\n]/g, "*");
-      return;
-    }
-    typedText.textContent = raw;
+  function focusInput() {
+    input.focus();
   }
 
-  function insertNewline() {
-    const start = input.selectionStart ?? input.value.length;
-    const end = input.selectionEnd ?? input.value.length;
-    const value = input.value;
-    input.value = `${value.slice(0, start)}\n${value.slice(end)}`;
-    const cursor = start + 1;
-    input.setSelectionRange(cursor, cursor);
-    updateMirror();
+  function moveCaretToEnd() {
+    const end = input.value.length;
+    input.setSelectionRange(end, end);
+  }
+
+  function setInputValue(value) {
+    input.value = value;
+    moveCaretToEnd();
+  }
+
+  function resetHistoryNavigation() {
+    historyIndex = null;
+    draftValue = "";
+  }
+
+  function applyHistoryStep(direction) {
+    if (history.length === 0) {
+      return;
+    }
+
+    if (historyIndex === null) {
+      draftValue = input.value;
+      historyIndex = history.length - 1;
+    } else {
+      historyIndex += direction;
+    }
+
+    if (historyIndex < 0) {
+      historyIndex = 0;
+    }
+
+    if (historyIndex >= history.length) {
+      historyIndex = null;
+      setInputValue(draftValue);
+      return;
+    }
+
+    setInputValue(history[historyIndex]);
   }
 
   function submitCommand() {
-    bus.emit("command:submit", { raw: input.value });
+    const raw = input.value;
+    if (raw.trim() !== "") {
+      history.push(raw);
+    }
+    resetHistoryNavigation();
+    bus.emit("command:submit", { raw });
     input.value = "";
-    updateMirror();
-    input.focus();
+    focusInput();
   }
 
   function bindInput() {
@@ -71,7 +101,27 @@ export function createTerminalUI(bus) {
         }
         event.preventDefault();
         submitCommand();
+        return;
       }
+
+      if (event.key === "ArrowUp") {
+        event.preventDefault();
+        applyHistoryStep(-1);
+        return;
+      }
+
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        applyHistoryStep(1);
+      }
+    });
+
+    input.addEventListener("input", () => {
+      resetHistoryNavigation();
+    });
+
+    terminal?.addEventListener("click", () => {
+      focusInput();
     });
   }
 
@@ -88,10 +138,10 @@ export function createTerminalUI(bus) {
   bus.on("input:placeholder", (text) => {
     input.placeholder = text ?? "";
   });
-  bus.on("input:focus", () => input.focus());
+  bus.on("input:focus", () => focusInput());
 
   bindInput();
-  updateMirror();
+  focusInput();
 
   function showIntro() {
     WELCOME_LINES.forEach((line) => appendLine(line));
