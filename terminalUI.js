@@ -4,6 +4,7 @@ const WELCOME_LINES = [
 ];
 
 export function createTerminalUI(bus) {
+  const terminal = document.querySelector(".terminal");
   const output = document.getElementById("output");
   const form = document.getElementById("command-form");
   const input = document.getElementById("command-input");
@@ -49,6 +50,13 @@ export function createTerminalUI(bus) {
   }
 
   function bindInput() {
+    terminal?.addEventListener("pointerdown", (event) => {
+      if (event.target.closest("a, button, input, textarea, select")) {
+        return;
+      }
+      input.focus();
+    });
+
     form.addEventListener("submit", (event) => {
       event.preventDefault();
       submitCommand();
