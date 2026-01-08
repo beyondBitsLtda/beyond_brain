@@ -7,9 +7,9 @@ const THEMES = [
   { key: "ice", name: "Ice", description: "ciano/preto" },
   { key: "violet", name: "Violet", description: "roxo/preto" },
   { key: "crimson", name: "Crimson", description: "vermelho/preto" },
-  { key: "lime", name: "Lime", description: "verde-lima/preto" },
-  { key: "paper", name: "Paper", description: "claro/escuro" },
-  { key: "ocean", name: "Ocean", description: "azul/preto" },
+  { key: "monk", name: "Monk Mode", description: "escrita profunda" },
+  { key: "neural", name: "Neural Grid", description: "estrutura técnica" },
+  { key: "dream", name: "Dream / Liminal", description: "sonho/intuição" },
 ];
 
 function isValidTheme(key) {

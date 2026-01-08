@@ -4,11 +4,25 @@
   --fg: #0f0;
   --muted: rgba(0, 255, 0, 0.7);
   --border: #0f0;
+  --border-soft: var(--border);
   --accent: #0f0;
   --cursor: #0f0;
   --glow: rgba(0, 255, 0, 0.25);
   --overlay: rgba(0, 0, 0, 0.92);
   --panel-bg: #000;
+  --font-family: "Fira Code", "Source Code Pro", Menlo, Consolas, monospace;
+  --border-width: 1px;
+  --output-gap: 0.25rem;
+  --line-height: 1.35;
+  --text-shadow: none;
+  --background-image: none;
+  --background-size: auto;
+  --background-repeat: repeat;
+  --background-position: center;
+  --screen-bg: transparent;
+  --input-bg: transparent;
+  --cursor-shadow: none;
+  --cursor-animation: blink 1s steps(1) infinite;
 }
 
 :root[data-theme="matrix"] {
@@ -17,11 +31,25 @@
   --fg: #0f0;
   --muted: rgba(0, 255, 0, 0.7);
   --border: #0f0;
+  --border-soft: var(--border);
   --accent: #0f0;
   --cursor: #0f0;
   --glow: rgba(0, 255, 0, 0.25);
   --overlay: rgba(0, 0, 0, 0.92);
   --panel-bg: #000;
+  --font-family: "Fira Code", "Source Code Pro", Menlo, Consolas, monospace;
+  --border-width: 1px;
+  --output-gap: 0.25rem;
+  --line-height: 1.35;
+  --text-shadow: none;
+  --background-image: none;
+  --background-size: auto;
+  --background-repeat: repeat;
+  --background-position: center;
+  --screen-bg: transparent;
+  --input-bg: transparent;
+  --cursor-shadow: none;
+  --cursor-animation: blink 1s steps(1) infinite;
 }
 
 :root[data-theme="amber"] {
@@ -30,11 +58,13 @@
   --fg: #ffb000;
   --muted: rgba(255, 176, 0, 0.7);
   --border: #ffb000;
+  --border-soft: var(--border);
   --accent: #ffb000;
   --cursor: #ffb000;
   --glow: rgba(255, 176, 0, 0.25);
   --overlay: rgba(10, 5, 0, 0.92);
   --panel-bg: #0a0500;
+  --font-family: "Fira Code", "Source Code Pro", Menlo, Consolas, monospace;
 }
 
 :root[data-theme="ice"] {
@@ -43,11 +73,13 @@
   --fg: #67e8f9;
   --muted: rgba(103, 232, 249, 0.7);
   --border: #22d3ee;
+  --border-soft: var(--border);
   --accent: #67e8f9;
   --cursor: #67e8f9;
   --glow: rgba(103, 232, 249, 0.25);
   --overlay: rgba(0, 18, 23, 0.92);
   --panel-bg: #001217;
+  --font-family: "Fira Code", "Source Code Pro", Menlo, Consolas, monospace;
 }
 
 :root[data-theme="violet"] {
@@ -56,11 +88,13 @@
   --fg: #d8b4fe;
   --muted: rgba(216, 180, 254, 0.7);
   --border: #c084fc;
+  --border-soft: var(--border);
   --accent: #d8b4fe;
   --cursor: #d8b4fe;
   --glow: rgba(216, 180, 254, 0.25);
   --overlay: rgba(17, 0, 28, 0.92);
   --panel-bg: #11001c;
+  --font-family: "Fira Code", "Source Code Pro", Menlo, Consolas, monospace;
 }
 
 :root[data-theme="crimson"] {
@@ -69,50 +103,96 @@
   --fg: #fb7185;
   --muted: rgba(251, 113, 133, 0.7);
   --border: #f43f5e;
+  --border-soft: var(--border);
   --accent: #fb7185;
   --cursor: #fb7185;
   --glow: rgba(251, 113, 133, 0.25);
   --overlay: rgba(18, 0, 3, 0.92);
   --panel-bg: #120003;
+  --font-family: "Fira Code", "Source Code Pro", Menlo, Consolas, monospace;
 }
 
-:root[data-theme="lime"] {
+:root[data-theme="monk"] {
   color-scheme: dark;
-  --bg: #0b1200;
-  --fg: #bef264;
-  --muted: rgba(190, 242, 100, 0.7);
-  --border: #a3e635;
-  --accent: #bef264;
-  --cursor: #bef264;
-  --glow: rgba(190, 242, 100, 0.25);
-  --overlay: rgba(11, 18, 0, 0.92);
-  --panel-bg: #0b1200;
+  --bg: #0e0e0e;
+  --fg: #f2f0eb;
+  --muted: #a8a8a8;
+  --border: #2a2a2a;
+  --border-soft: #2a2a2a;
+  --accent: #f2f0eb;
+  --cursor: #f2f0eb;
+  --glow: rgba(0, 0, 0, 0);
+  --overlay: rgba(14, 14, 14, 0.92);
+  --panel-bg: #0e0e0e;
+  --font-family: "Merriweather", "Georgia", serif;
+  --border-width: 0.75px;
+  --output-gap: 0.4rem;
+  --line-height: 1.6;
+  --text-shadow: none;
+  --background-image: none;
+  --screen-bg: transparent;
+  --input-bg: transparent;
+  --cursor-shadow: none;
+  --cursor-animation: blink 1.2s steps(1) infinite;
 }
 
-:root[data-theme="paper"] {
-  color-scheme: light;
-  --bg: #f8f4e6;
-  --fg: #1f2937;
-  --muted: rgba(31, 41, 55, 0.65);
-  --border: #1f2937;
-  --accent: #0f172a;
-  --cursor: #1f2937;
-  --glow: rgba(31, 41, 55, 0.2);
-  --overlay: rgba(248, 244, 230, 0.92);
-  --panel-bg: #f5efe0;
-}
-
-:root[data-theme="ocean"] {
+:root[data-theme="neural"] {
   color-scheme: dark;
-  --bg: #00111d;
-  --fg: #7dd3fc;
-  --muted: rgba(125, 211, 252, 0.7);
-  --border: #38bdf8;
-  --accent: #7dd3fc;
-  --cursor: #7dd3fc;
-  --glow: rgba(125, 211, 252, 0.25);
-  --overlay: rgba(0, 17, 29, 0.92);
-  --panel-bg: #00111d;
+  --bg: #050b07;
+  --fg: #7cff9e;
+  --muted: #3fa96b;
+  --border: #1f5c3a;
+  --border-soft: #1f5c3a;
+  --accent: #7cff9e;
+  --cursor: #7cff9e;
+  --glow: rgba(124, 255, 158, 0.35);
+  --overlay: rgba(5, 11, 7, 0.92);
+  --panel-bg: #050b07;
+  --font-family: "JetBrains Mono", "IBM Plex Mono", monospace;
+  --border-width: 2px;
+  --output-gap: 0.3rem;
+  --line-height: 1.4;
+  --text-shadow: none;
+  --background-image:
+    linear-gradient(rgba(31, 92, 58, 0.18) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(31, 92, 58, 0.18) 1px, transparent 1px);
+  --background-size: 32px 32px;
+  --background-repeat: repeat;
+  --screen-bg: rgba(5, 11, 7, 0.6);
+  --input-bg: rgba(7, 18, 12, 0.8);
+  --cursor-shadow: 0 0 8px rgba(124, 255, 158, 0.6);
+  --cursor-animation: blink 0.9s steps(1) infinite;
+}
+
+:root[data-theme="dream"] {
+  color-scheme: dark;
+  --bg: #0b0614;
+  --fg: #e6dcff;
+  --muted: #9f8cff;
+  --border: #3b2a5a;
+  --border-soft: rgba(59, 42, 90, 0.6);
+  --accent: #c7a8ff;
+  --cursor: #c7a8ff;
+  --glow: rgba(199, 168, 255, 0.3);
+  --overlay: rgba(11, 6, 20, 0.92);
+  --panel-bg: rgba(11, 6, 20, 0.96);
+  --font-family: "Space Grotesk", "Inter", sans-serif;
+  --border-width: 1px;
+  --output-gap: 0.3rem;
+  --line-height: 1.5;
+  --text-shadow: 0 0 10px rgba(159, 140, 255, 0.25);
+  --background-image: radial-gradient(
+      circle at top,
+      rgba(79, 56, 131, 0.25),
+      transparent 55%
+    ),
+    linear-gradient(135deg, rgba(18, 12, 30, 0.95), rgba(11, 6, 20, 0.9));
+  --background-size: cover;
+  --background-repeat: no-repeat;
+  --screen-bg: rgba(11, 6, 20, 0.6);
+  --input-bg: rgba(18, 10, 28, 0.75);
+  --cursor-shadow: 0 0 10px rgba(199, 168, 255, 0.65);
+  --cursor-animation: pulse 1.4s ease-in-out infinite;
 }
 
 *,
@@ -128,13 +208,18 @@ body {
   align-items: center;
   justify-content: center;
   background: var(--bg);
+  background-image: var(--background-image);
+  background-size: var(--background-size);
+  background-repeat: var(--background-repeat);
+  background-position: var(--background-position);
   color: var(--fg);
-  font-family: "Fira Code", "Source Code Pro", Menlo, Consolas, monospace;
+  font-family: var(--font-family);
+  text-shadow: var(--text-shadow);
 }
 
 .terminal {
   width: min(1200px, 96vw);
-  border: 1px solid var(--border);
+  border: var(--border-width) solid var(--border-soft);
   padding: 1.5rem;
   background: var(--bg);
   box-shadow: 0 0 12px var(--glow);
@@ -156,17 +241,19 @@ body {
   max-height: 72vh;
   overflow-y: auto;
   padding: 0.5rem;
-  border: 1px solid var(--border);
+  border: var(--border-width) solid var(--border-soft);
   margin-bottom: 1rem;
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
+  gap: var(--output-gap);
   font-size: 0.95rem;
+  background: var(--screen-bg);
 }
 
 .terminal__line {
   white-space: pre-wrap;
   word-break: break-word;
+  line-height: var(--line-height);
 }
 
 .terminal__input-row {
@@ -174,8 +261,9 @@ body {
   display: flex;
   align-items: flex-start;
   gap: 0.5rem;
-  border: 1px solid var(--border);
+  border: var(--border-width) solid var(--border-soft);
   padding: 0.5rem;
+  background: var(--input-bg);
 }
 
 .terminal__prompt {
@@ -208,13 +296,29 @@ body {
   width: 10px;
   height: 1.2em;
   background: var(--cursor);
-  animation: blink 1s steps(1) infinite;
+  box-shadow: var(--cursor-shadow);
+  animation: var(--cursor-animation);
   align-self: flex-start;
 }
 
 @keyframes blink {
   50% {
     opacity: 0;
+  }
+}
+
+@keyframes pulse {
+  0% {
+    opacity: 0.35;
+    transform: scaleX(0.9);
+  }
+  50% {
+    opacity: 1;
+    transform: scaleX(1);
+  }
+  100% {
+    opacity: 0.35;
+    transform: scaleX(0.9);
   }
 }
 
@@ -236,7 +340,7 @@ body {
 .graph-panel {
   width: 100%;
   height: 100%;
-  border: 1px solid var(--border);
+  border: var(--border-width) solid var(--border-soft);
   background: var(--panel-bg);
   box-shadow: 0 0 14px var(--glow);
   display: flex;
@@ -248,7 +352,7 @@ body {
   justify-content: space-between;
   align-items: center;
   padding: 0.75rem 1rem;
-  border-bottom: 1px solid var(--border);
+  border-bottom: var(--border-width) solid var(--border-soft);
   font-weight: 700;
   letter-spacing: 0.08em;
 }
@@ -270,7 +374,7 @@ body {
 
 .graph-canvas {
   position: relative;
-  border: 1px solid var(--border);
+  border: var(--border-width) solid var(--border-soft);
   min-height: 0;
 }
 
@@ -293,7 +397,7 @@ body {
 }
 
 .graph-detail {
-  border: 1px solid var(--border);
+  border: var(--border-width) solid var(--border-soft);
   padding: 1rem;
   font-size: 0.9rem;
   display: flex;
