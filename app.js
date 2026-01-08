@@ -21,9 +21,12 @@ import { resetBrainCommand } from "./commands/resetBrain.js";
 import { nowCommand } from "./commands/now.js";
 import { lastCommand } from "./commands/last.js";
 import { focusCommand } from "./commands/focus.js";
+import { themeCommand } from "./commands/theme.js";
+import { loadTheme } from "./themeManager.js";
 
 const bus = createEventBus();
 const focusManager = createFocusManager(bus);
+const initialTheme = loadTheme();
 
 const ui = createTerminalUI(bus);
 ui.showIntro();
@@ -60,8 +63,11 @@ const commands = {
   reset: resetBrainCommand(bus),
   NUKE: resetBrainCommand(bus),
   nuke: resetBrainCommand(bus),
+  theme: themeCommand(bus),
 };
 
 createCommandRouter(bus, commands);
+
+bus.emit("theme:change", { key: initialTheme });
 
 bootstrapSession(bus);
