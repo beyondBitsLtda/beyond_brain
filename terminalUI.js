@@ -4,7 +4,6 @@ const WELCOME_LINES = [
 ];
 
 export function createTerminalUI(bus) {
-  const terminal = document.querySelector(".terminal");
   const output = document.getElementById("output");
   const form = document.getElementById("command-form");
   const input = document.getElementById("command-input");
@@ -88,11 +87,35 @@ export function createTerminalUI(bus) {
       submitCommand();
     });
 
+    input.addEventListener("input", () => {
+      updateMirror();
+    });
+
     input.addEventListener("keydown", (event) => {
+      if (event.key === "Tab") {
+        event.preventDefault();
+        insertNewline();
+        return;
+      }
+
       if (event.key === "Enter") {
+        if (event.shiftKey) {
+          return;
+        }
         event.preventDefault();
         submitCommand();
         return;
+      }
+
+      if (event.key === "ArrowUp") {
+        event.preventDefault();
+        applyHistoryStep(-1);
+        return;
+      }
+
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        applyHistoryStep(1);
       }
 
       if (event.key === "ArrowUp") {
@@ -114,15 +137,25 @@ export function createTerminalUI(bus) {
     terminal?.addEventListener("click", () => {
       focusInput();
     });
+
+    input.addEventListener("input", () => {
+      resetHistoryNavigation();
+    });
+
+    terminal?.addEventListener("click", () => {
+      focusInput();
+    });
   }
 
   bus.on("output:append", (text) => appendLine(text));
   bus.on("output:clear", () => clearOutput());
   bus.on("input:mask", () => {
-    input.type = "password";
+    isMasked = true;
+    updateMirror();
   });
   bus.on("input:unmask", () => {
-    input.type = "text";
+    isMasked = false;
+    updateMirror();
   });
   bus.on("input:placeholder", (text) => {
     input.placeholder = text ?? "";
