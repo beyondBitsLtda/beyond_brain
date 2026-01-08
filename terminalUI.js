@@ -181,7 +181,46 @@ export function createTerminalUI(bus) {
         }
         event.preventDefault();
         submitCommand();
+        return;
       }
+
+      if (event.key === "ArrowUp") {
+        event.preventDefault();
+        applyHistoryStep(-1);
+        return;
+      }
+
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        applyHistoryStep(1);
+      }
+
+      if (event.key === "ArrowUp") {
+        event.preventDefault();
+        applyHistoryStep(-1);
+        return;
+      }
+
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        applyHistoryStep(1);
+      }
+    });
+
+    input.addEventListener("input", () => {
+      resetHistoryNavigation();
+    });
+
+    terminal?.addEventListener("click", () => {
+      focusInput();
+    });
+
+    input.addEventListener("input", () => {
+      resetHistoryNavigation();
+    });
+
+    terminal?.addEventListener("click", () => {
+      focusInput();
     });
 
     input.addEventListener("click", () => {
@@ -216,7 +255,7 @@ export function createTerminalUI(bus) {
   bus.on("input:placeholder", (text) => {
     input.placeholder = text ?? "";
   });
-  bus.on("input:focus", () => input.focus());
+  bus.on("input:focus", () => focusInput());
 
   bindInput();
   updateMirror();
