@@ -1,5 +1,6 @@
 import { getSupabaseClient } from "./supabaseClient.js";
 import { clearSession } from "./sessionStore.js";
+import { getCurrentTheme } from "./themeManager.js";
 
 const LABEL_LIMIT = 24;
 const DEPTH_MIN = 1;
@@ -83,6 +84,8 @@ export function createGraphUI(bus, focusManager) {
   let cy = null;
   let isOpen = false;
   let lastOptions = { focusNoteId: null, depth: DEPTH_MIN };
+  let edgePulseFrame = null;
+  let edgePulseStart = null;
 
   function getThemeTokens() {
     const styles = getComputedStyle(document.documentElement);
@@ -92,6 +95,87 @@ export function createGraphUI(bus, focusManager) {
       border: styles.getPropertyValue("--border").trim() || "#0f0",
       accent: styles.getPropertyValue("--accent").trim() || "#0f0",
     };
+  }
+
+  function isSteveTheme() {
+    return getCurrentTheme() === "steve";
+  }
+
+  function getEdgeStyle(border) {
+    if (isSteveTheme()) {
+      return {
+        width: 3,
+        "line-color": "#ff2b3a",
+        "target-arrow-shape": "triangle",
+        "target-arrow-color": "#ff2b3a",
+        "curve-style": "bezier",
+        opacity: 0.75,
+        "shadow-blur": 12,
+        "shadow-color": "rgba(255, 43, 58, 0.7)",
+        "shadow-opacity": 0.8,
+      };
+    }
+
+    return {
+      width: 1,
+      "line-color": border,
+      "target-arrow-shape": "triangle",
+      "target-arrow-color": border,
+      "curve-style": "bezier",
+    };
+  }
+
+  function stopSteveEdgePulse() {
+    if (edgePulseFrame) {
+      cancelAnimationFrame(edgePulseFrame);
+      edgePulseFrame = null;
+    }
+    edgePulseStart = null;
+  }
+
+  function shouldPulseSteveEdges() {
+    return isOpen && cy && isSteveTheme();
+  }
+
+  function startSteveEdgePulse() {
+    stopSteveEdgePulse();
+    if (!cy) return;
+
+    const edges = cy.edges();
+    const minWidth = 2.5;
+    const maxWidth = 3.5;
+    const minOpacity = 0.6;
+    const maxOpacity = 0.85;
+    const minShadow = 8;
+    const maxShadow = 14;
+    const speed = 0.6;
+
+    const tick = (timestamp) => {
+      if (!shouldPulseSteveEdges()) {
+        stopSteveEdgePulse();
+        return;
+      }
+      if (!edgePulseStart) edgePulseStart = timestamp;
+      const elapsed = (timestamp - edgePulseStart) / 1000;
+      const wave = (Math.sin(elapsed * Math.PI * 2 * speed) + 1) / 2;
+      const glowWave = (Math.sin(elapsed * Math.PI * 2 * speed + Math.PI / 2) + 1) / 2;
+      const width = minWidth + (maxWidth - minWidth) * wave;
+      const opacity = minOpacity + (maxOpacity - minOpacity) * glowWave;
+      const shadowBlur = minShadow + (maxShadow - minShadow) * glowWave;
+
+      edges.style({ width, opacity, "shadow-blur": shadowBlur });
+      edgePulseFrame = requestAnimationFrame(tick);
+    };
+
+    edgePulseFrame = requestAnimationFrame(tick);
+  }
+
+  function updateSteveEdgePulse() {
+    if (shouldPulseSteveEdges()) {
+      startSteveEdgePulse();
+      return;
+    }
+    stopSteveEdgePulse();
   }
 
   function applyGraphTheme() {
@@ -113,13 +197,7 @@ export function createGraphUI(bus, focusManager) {
       },
       {
         selector: "edge",
-        style: {
-          width: 1,
-          "line-color": border,
-          "target-arrow-shape": "triangle",
-          "target-arrow-color": border,
-          "curve-style": "bezier",
-        },
+        style: getEdgeStyle(border),
       },
       {
         selector: "node:selected",
@@ -129,6 +207,7 @@ export function createGraphUI(bus, focusManager) {
         },
       },
     ]);
+    updateSteveEdgePulse();
   }
 
   overlay.addEventListener("pointerdown", (event) => {
@@ -181,13 +260,7 @@ export function createGraphUI(bus, focusManager) {
         },
         {
           selector: "edge",
-          style: {
-            width: 1,
-            "line-color": border,
-            "target-arrow-shape": "triangle",
-            "target-arrow-color": border,
-            "curve-style": "bezier",
-          },
+          style: getEdgeStyle(border),
         },
         {
           selector: "node:selected",
@@ -210,6 +283,7 @@ export function createGraphUI(bus, focusManager) {
       }
     });
 
+    updateSteveEdgePulse();
     return cy;
   }
 
@@ -313,11 +387,13 @@ export function createGraphUI(bus, focusManager) {
     isOpen = true;
     bus.emit("input:focus");
     loadGraph(options);
+    updateSteveEdgePulse();
   }
 
   function closeGraph() {
     overlay.hidden = true;
     isOpen = false;
+    stopSteveEdgePulse();
   }
 
   function toggleGraph() {
