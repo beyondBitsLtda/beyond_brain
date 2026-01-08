@@ -197,31 +197,26 @@
 
 :root[data-theme="steve"] {
   color-scheme: dark;
-  --bg: #070308;
-  --fg: #f4d1d6;
-  --muted: rgba(244, 209, 214, 0.7);
-  --border: #90202a;
-  --border-soft: rgba(144, 32, 42, 0.7);
+  --bg: #07040a;
+  --fg: #e8d9ff;
+  --muted: #a99cbc;
+  --border: rgba(255, 43, 58, 0.35);
+  --border-soft: rgba(255, 43, 58, 0.25);
   --accent: #ff2b3a;
   --cursor: #ff2b3a;
   --glow: rgba(255, 43, 58, 0.35);
-  --overlay: rgba(7, 3, 8, 0.94);
-  --panel-bg: rgba(10, 4, 10, 0.98);
+  --overlay: rgba(7, 4, 10, 0.94);
+  --panel-bg: rgba(8, 4, 12, 0.98);
   --font-family: "Fira Code", "Source Code Pro", Menlo, Consolas, monospace;
   --border-width: 1px;
   --output-gap: 0.3rem;
   --line-height: 1.4;
-  --text-shadow: 0 0 8px rgba(255, 43, 58, 0.2);
-  --background-image: radial-gradient(
-      circle at 20% 20%,
-      rgba(255, 43, 58, 0.12),
-      transparent 45%
-    ),
-    radial-gradient(circle at 70% 30%, rgba(144, 32, 42, 0.18), transparent 40%);
-  --background-size: cover;
-  --background-repeat: no-repeat;
-  --screen-bg: rgba(7, 3, 8, 0.6);
-  --input-bg: rgba(12, 4, 10, 0.75);
+  --text-shadow: none;
+  --background-image: none;
+  --background-size: auto;
+  --background-repeat: repeat;
+  --screen-bg: rgba(7, 4, 10, 0.65);
+  --input-bg: rgba(10, 5, 14, 0.75);
   --cursor-shadow: 0 0 8px rgba(255, 43, 58, 0.65);
   --cursor-animation: blink 1s steps(1) infinite;
 }
@@ -242,7 +237,7 @@
   --border-width: 1px;
   --output-gap: 0.3rem;
   --line-height: 1.4;
-  --text-shadow: 0 0 10px rgba(214, 246, 255, 0.3);
+  --text-shadow: none;
   --screen-bg: rgba(2, 4, 12, 0.65);
   --input-bg: rgba(4, 8, 18, 0.7);
   --cursor-shadow: 0 0 10px rgba(255, 211, 106, 0.55);
@@ -280,29 +275,7 @@ body::after {
   inset: 0;
   pointer-events: none;
   opacity: 0;
-  transition: opacity 600ms ease;
   z-index: 0;
-}
-
-html[data-theme="star"] body::before {
-  background-image:
-    radial-gradient(1px 1px at 20% 30%, rgba(214, 246, 255, 0.7), transparent 40%),
-    radial-gradient(1px 1px at 80% 20%, rgba(214, 246, 255, 0.6), transparent 40%),
-    radial-gradient(1px 1px at 40% 70%, rgba(214, 246, 255, 0.5), transparent 40%),
-    radial-gradient(1px 1px at 70% 80%, rgba(214, 246, 255, 0.55), transparent 40%),
-    radial-gradient(1px 1px at 15% 85%, rgba(214, 246, 255, 0.6), transparent 40%);
-  opacity: 0.9;
-  animation: starTwinkle 9s ease-in-out infinite;
-}
-
-html[data-theme="star"] body::after {
-  background-image:
-    radial-gradient(2px 2px at 10% 20%, rgba(255, 211, 106, 0.8), transparent 45%),
-    radial-gradient(2px 2px at 65% 35%, rgba(214, 246, 255, 0.7), transparent 45%),
-    radial-gradient(2px 2px at 30% 60%, rgba(214, 246, 255, 0.65), transparent 45%),
-    radial-gradient(2px 2px at 85% 75%, rgba(255, 211, 106, 0.75), transparent 45%);
-  opacity: 0.7;
-  animation: starTwinkle 12s ease-in-out infinite;
 }
 
 .fx-invert {
@@ -317,41 +290,6 @@ html[data-theme="star"] body::after {
   box-shadow: 0 0 12px var(--glow);
   position: relative;
   z-index: 1;
-}
-
-#theme-lightning {
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  opacity: 0;
-  display: none;
-  z-index: 2;
-  mix-blend-mode: screen;
-  background:
-    radial-gradient(
-      circle at 30% 20%,
-      rgba(255, 43, 58, 0.4),
-      transparent 55%
-    ),
-    radial-gradient(
-      circle at 70% 80%,
-      rgba(255, 43, 58, 0.35),
-      transparent 60%
-    ),
-    linear-gradient(
-      120deg,
-      rgba(255, 43, 58, 0.2),
-      transparent 60%
-    );
-  filter: blur(2px);
-}
-
-html[data-theme="steve"] #theme-lightning {
-  display: block;
-}
-
-.fx-lightning {
-  animation: lightningFlash 600ms ease-out 1;
 }
 
 .terminal__header {
@@ -454,29 +392,128 @@ html[data-theme="steve"] #theme-lightning {
 @keyframes starTwinkle {
   0%,
   100% {
-    opacity: 0.6;
+    opacity: 0.85;
   }
   50% {
     opacity: 1;
   }
 }
 
-@keyframes lightningFlash {
+@keyframes starDrift {
   0% {
+    transform: translate(0px, 0px);
+  }
+  100% {
+    transform: translate(-6px, 4px);
+  }
+}
+
+@keyframes upsideLightning {
+  0%,
+  10%,
+  20%,
+  35%,
+  55%,
+  70%,
+  100% {
     opacity: 0;
+    transform: translate(0, 0);
   }
-  5% {
-    opacity: 0.35;
+  11% {
+    opacity: 0.22;
   }
-  10% {
-    opacity: 0.08;
+  12% {
+    opacity: 0.05;
+  }
+  13% {
+    opacity: 0.3;
+    transform: translate(0.5px, -0.5px);
   }
   14% {
-    opacity: 0.28;
-  }
-  18% {
     opacity: 0;
   }
+  36% {
+    opacity: 0.18;
+  }
+  37% {
+    opacity: 0.04;
+  }
+  38% {
+    opacity: 0.26;
+    transform: translate(0.5px, -0.5px);
+  }
+  39% {
+    opacity: 0;
+  }
+  56% {
+    opacity: 0.28;
+  }
+  57% {
+    opacity: 0.06;
+  }
+  58% {
+    opacity: 0.34;
+    transform: translate(0.5px, -0.5px);
+  }
+  59% {
+    opacity: 0;
+  }
+}
+
+html[data-theme="steve"] body {
+  background:
+    radial-gradient(circle at 20% 30%, rgba(255, 43, 58, 0.18), transparent 45%),
+    radial-gradient(circle at 75% 70%, rgba(255, 43, 58, 0.12), transparent 55%),
+    linear-gradient(180deg, #07040a, #05020a);
+}
+
+html[data-theme="steve"] body::before {
+  background:
+    radial-gradient(circle at 30% 40%, rgba(255, 43, 58, 0.08), transparent 60%),
+    radial-gradient(circle at 80% 20%, rgba(255, 43, 58, 0.06), transparent 65%);
+  opacity: 0.5;
+}
+
+html[data-theme="steve"] body::after {
+  background:
+    radial-gradient(circle at 30% 30%, rgba(255, 43, 58, 0.55), transparent 60%),
+    radial-gradient(circle at 70% 50%, rgba(255, 43, 58, 0.35), transparent 65%),
+    linear-gradient(
+      120deg,
+      rgba(255, 43, 58, 0),
+      rgba(255, 43, 58, 0.22),
+      rgba(255, 43, 58, 0)
+    );
+  opacity: 0;
+  mix-blend-mode: screen;
+  filter: blur(2px);
+  animation: upsideLightning 9s infinite;
+}
+
+html[data-theme="star"] body {
+  background: linear-gradient(180deg, #02030a, #00010a);
+}
+
+html[data-theme="star"] body::before {
+  background-image:
+    radial-gradient(circle at 10% 20%, rgba(255, 255, 255, 0.9) 1px, transparent 2px),
+    radial-gradient(circle at 22% 78%, rgba(255, 255, 255, 0.6) 1px, transparent 2px),
+    radial-gradient(circle at 35% 40%, rgba(255, 255, 255, 0.7) 1px, transparent 2px),
+    radial-gradient(circle at 48% 15%, rgba(255, 255, 255, 0.5) 1px, transparent 2px),
+    radial-gradient(circle at 60% 65%, rgba(255, 255, 255, 0.8) 1px, transparent 2px),
+    radial-gradient(circle at 75% 30%, rgba(255, 255, 255, 0.6) 1px, transparent 2px),
+    radial-gradient(circle at 88% 85%, rgba(255, 255, 255, 0.7) 1px, transparent 2px);
+  opacity: 0.9;
+  animation: starTwinkle 8s ease-in-out infinite;
+}
+
+html[data-theme="star"] body::after {
+  background-image:
+    radial-gradient(circle at 15% 35%, rgba(255, 255, 255, 0.9) 1.5px, transparent 3px),
+    radial-gradient(circle at 55% 75%, rgba(255, 255, 255, 0.8) 1.5px, transparent 3px),
+    radial-gradient(circle at 82% 22%, rgba(255, 255, 255, 0.85) 1.5px, transparent 3px);
+  opacity: 0.55;
+  animation: starDrift 14s linear infinite;
 }
 
 .graph-overlay {

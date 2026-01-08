@@ -27,7 +27,6 @@ import { createPetManager } from "./petManager.js";
 import { petCommand } from "./commands/pet.js";
 import { steveCommand } from "./commands/steve.js";
 import { starCommand } from "./commands/star.js";
-import { applyThemeFx } from "./effects/themeFx.js";
 
 const bus = createEventBus();
 const focusManager = createFocusManager(bus);
@@ -76,12 +75,6 @@ const commands = {
 };
 
 createCommandRouter(bus, commands);
-
-bus.on("theme:change", ({ key }) => {
-  applyThemeFx(key);
-});
-
-applyThemeFx(initialTheme);
 bus.emit("theme:change", { key: initialTheme });
 
 bootstrapSession(bus);
