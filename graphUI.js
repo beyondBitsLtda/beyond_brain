@@ -84,6 +84,53 @@ export function createGraphUI(bus, focusManager) {
   let isOpen = false;
   let lastOptions = { focusNoteId: null, depth: DEPTH_MIN };
 
+  function getThemeTokens() {
+    const styles = getComputedStyle(document.documentElement);
+    return {
+      bg: styles.getPropertyValue("--bg").trim() || "#000",
+      fg: styles.getPropertyValue("--fg").trim() || "#0f0",
+      border: styles.getPropertyValue("--border").trim() || "#0f0",
+      accent: styles.getPropertyValue("--accent").trim() || "#0f0",
+    };
+  }
+
+  function applyGraphTheme() {
+    if (!cy) return;
+    const { bg, fg, border, accent } = getThemeTokens();
+    cy.style([
+      {
+        selector: "node",
+        style: {
+          "background-color": bg,
+          "border-color": border,
+          "border-width": 1,
+          color: fg,
+          label: "data(label)",
+          "font-size": 10,
+          "text-wrap": "wrap",
+          "text-max-width": 80,
+        },
+      },
+      {
+        selector: "edge",
+        style: {
+          width: 1,
+          "line-color": border,
+          "target-arrow-shape": "triangle",
+          "target-arrow-color": border,
+          "curve-style": "bezier",
+        },
+      },
+      {
+        selector: "node:selected",
+        style: {
+          "background-color": accent,
+          color: bg,
+        },
+      },
+    ]);
+  }
+
   overlay.addEventListener("pointerdown", (event) => {
     if (event.target.closest(".graph-panel")) {
       setTimeout(() => bus.emit("input:focus"), 0);
@@ -114,6 +161,7 @@ export function createGraphUI(bus, focusManager) {
       bus.emit("output:append", "Cytoscape.js não carregado.");
       return null;
     }
+    const { bg, fg, border, accent } = getThemeTokens();
     cy = window.cytoscape({
       container: canvas,
       elements: [],
@@ -121,10 +169,10 @@ export function createGraphUI(bus, focusManager) {
         {
           selector: "node",
           style: {
-            "background-color": "#000",
-            "border-color": "#0f0",
+            "background-color": bg,
+            "border-color": border,
             "border-width": 1,
-            color: "#0f0",
+            color: fg,
             label: "data(label)",
             "font-size": 10,
             "text-wrap": "wrap",
@@ -135,17 +183,17 @@ export function createGraphUI(bus, focusManager) {
           selector: "edge",
           style: {
             width: 1,
-            "line-color": "#0f0",
+            "line-color": border,
             "target-arrow-shape": "triangle",
-            "target-arrow-color": "#0f0",
+            "target-arrow-color": border,
             "curve-style": "bezier",
           },
         },
         {
           selector: "node:selected",
           style: {
-            "background-color": "#0f0",
-            color: "#000",
+            "background-color": accent,
+            color: bg,
           },
         },
       ],
@@ -164,6 +212,10 @@ export function createGraphUI(bus, focusManager) {
 
     return cy;
   }
+
+  bus.on("theme:change", () => {
+    applyGraphTheme();
+  });
 
   async function getAuthenticatedUser(client) {
     const { data, error } = await client.auth.getUser();
