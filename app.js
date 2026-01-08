@@ -23,10 +23,13 @@ import { lastCommand } from "./commands/last.js";
 import { focusCommand } from "./commands/focus.js";
 import { themeCommand } from "./commands/theme.js";
 import { loadTheme } from "./themeManager.js";
+import { createPetManager } from "./petManager.js";
+import { petCommand } from "./commands/pet.js";
 
 const bus = createEventBus();
 const focusManager = createFocusManager(bus);
 const initialTheme = loadTheme();
+const petManager = createPetManager(bus);
 
 const ui = createTerminalUI(bus);
 ui.showIntro();
@@ -64,6 +67,7 @@ const commands = {
   NUKE: resetBrainCommand(bus),
   nuke: resetBrainCommand(bus),
   theme: themeCommand(bus),
+  pet: petCommand(bus, petManager),
 };
 
 createCommandRouter(bus, commands);
