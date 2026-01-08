@@ -11,7 +11,7 @@ const THEMES = [
   { key: "neural", name: "Neural Grid", description: "estrutura técnica" },
   { key: "dream", name: "Dream / Liminal", description: "sonho/intuição" },
 ];
-const SECRET_THEMES = new Set(["steve"]);
+const SECRET_THEMES = new Set(["steve", "star"]);
 
 function isValidTheme(key) {
   return THEMES.some((theme) => theme.key === key) || SECRET_THEMES.has(key);

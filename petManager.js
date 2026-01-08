@@ -1,5 +1,6 @@
 import { getSupabaseClient } from "./supabaseClient.js";
 import { clearSession } from "./sessionStore.js";
+import { getCurrentTheme } from "./themeManager.js";
 
 const MAX_BODY_LENGTH = 300;
 const PET_NAME_KEY = "bb_pet_name";
@@ -22,6 +23,16 @@ const MOOD_VARIANTS = {
   wise: [
     ["  /\\_/\\ ", " ( •_• )", "  >📜<"],
     ["  /\\_/\\ ", " ( •‿• )", "  >📜<"],
+  ],
+};
+const THEME_PET_VARIANTS = {
+  steve: [
+    ["  /\\_/\\ ", " ( o o )", "  / V \\"],
+    ["  /\\_/\\ ", " ( x x )", "  / V \\"],
+  ],
+  star: [
+    ["  .-^-.", " ( o o )", "  |___|"],
+    ["  .-^-.", " ( -.- )", "  |___|"],
   ],
 };
 
@@ -137,6 +148,12 @@ export function createPetManager(bus) {
   }
 
   function pickMoodAscii(mood) {
+    const theme = getCurrentTheme();
+    const themedVariants = THEME_PET_VARIANTS[theme];
+    if (themedVariants) {
+      const index = Math.floor(Math.random() * themedVariants.length);
+      return themedVariants[index];
+    }
     const variants = MOOD_VARIANTS[mood] ?? MOOD_VARIANTS.calm;
     const index = Math.floor(Math.random() * variants.length);
     return variants[index];
