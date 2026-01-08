@@ -124,6 +124,11 @@ export function createTerminalUI(bus) {
     scheduleCursorUpdate();
   }
 
+  function focusInput() {
+    input.focus();
+    scheduleCursorUpdate();
+  }
+
   function insertNewline() {
     const start = input.selectionStart ?? input.value.length;
     const end = input.selectionEnd ?? input.value.length;

@@ -18,7 +18,8 @@ const HELP_TEXT = `Comandos disponíveis:
 - graph: alterna o grafo das notas
 - graph note "uuid" [1|2]: foca no subgrafo da nota
 - focus "uuid" | focus clear: define ou limpa o modo foco
-- RESET BRAIN: remove todas as notas e relações do usuário (NUKE BRAIN também funciona)`;
+- RESET BRAIN: remove todas as notas e relações do usuário (NUKE BRAIN também funciona)
+- theme: escolhe um tema de cores (1-8)`;
 
 export function helpCommand(bus) {
   return () => {
