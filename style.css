@@ -195,6 +195,37 @@
   --cursor-animation: pulse 1.4s ease-in-out infinite;
 }
 
+:root[data-theme="steve"] {
+  color-scheme: dark;
+  --bg: #070308;
+  --fg: #f4d1d6;
+  --muted: rgba(244, 209, 214, 0.7);
+  --border: #90202a;
+  --border-soft: rgba(144, 32, 42, 0.7);
+  --accent: #ff2b3a;
+  --cursor: #ff2b3a;
+  --glow: rgba(255, 43, 58, 0.35);
+  --overlay: rgba(7, 3, 8, 0.94);
+  --panel-bg: rgba(10, 4, 10, 0.98);
+  --font-family: "Fira Code", "Source Code Pro", Menlo, Consolas, monospace;
+  --border-width: 1px;
+  --output-gap: 0.3rem;
+  --line-height: 1.4;
+  --text-shadow: 0 0 8px rgba(255, 43, 58, 0.2);
+  --background-image: radial-gradient(
+      circle at 20% 20%,
+      rgba(255, 43, 58, 0.12),
+      transparent 45%
+    ),
+    radial-gradient(circle at 70% 30%, rgba(144, 32, 42, 0.18), transparent 40%);
+  --background-size: cover;
+  --background-repeat: no-repeat;
+  --screen-bg: rgba(7, 3, 8, 0.6);
+  --input-bg: rgba(12, 4, 10, 0.75);
+  --cursor-shadow: 0 0 8px rgba(255, 43, 58, 0.65);
+  --cursor-animation: blink 1s steps(1) infinite;
+}
+
 *,
 *::before,
 *::after {
@@ -207,6 +238,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
+  transition: filter 250ms ease;
   background: var(--bg);
   background-image: var(--background-image);
   background-size: var(--background-size);
@@ -215,6 +247,10 @@ body {
   color: var(--fg);
   font-family: var(--font-family);
   text-shadow: var(--text-shadow);
+}
+
+.fx-invert {
+  filter: invert(1) hue-rotate(180deg) contrast(1.05);
 }
 
 .terminal {
