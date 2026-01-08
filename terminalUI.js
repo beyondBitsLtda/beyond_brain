@@ -7,6 +7,9 @@ export function createTerminalUI(bus) {
   const output = document.getElementById("output");
   const form = document.getElementById("command-form");
   const input = document.getElementById("command-input");
+  if (!output || !form || !input) {
+    return { showIntro: () => {} };
+  }
   const history = [];
   let historyIndex = null;
   let draftValue = "";
@@ -114,6 +117,25 @@ export function createTerminalUI(bus) {
         event.preventDefault();
         applyHistoryStep(1);
       }
+
+      if (event.key === "ArrowUp") {
+        event.preventDefault();
+        applyHistoryStep(-1);
+        return;
+      }
+
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        applyHistoryStep(1);
+      }
+    });
+
+    input.addEventListener("input", () => {
+      resetHistoryNavigation();
+    });
+
+    terminal?.addEventListener("click", () => {
+      focusInput();
     });
 
     input.addEventListener("input", () => {
