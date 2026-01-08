@@ -531,6 +531,14 @@ html[data-theme="star"] body::after {
   animation: starDrift 14s linear infinite;
 }
 
+html[data-theme="xp"] body {
+  background-image: url("./xp.jpg");
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-attachment: fixed;
+}
+
 .graph-overlay {
   position: absolute;
   inset: 0;
