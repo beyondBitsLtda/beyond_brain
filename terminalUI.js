@@ -4,10 +4,11 @@ const WELCOME_LINES = [
 ];
 
 export function createTerminalUI(bus) {
-  const terminal = document.querySelector(".terminal");
   const output = document.getElementById("output");
   const form = document.getElementById("command-form");
   const input = document.getElementById("command-input");
+  const typedText = document.getElementById("typedText");
+  let isMasked = false;
 
   function appendLine(text) {
     const line = document.createElement("div");
@@ -21,27 +22,53 @@ export function createTerminalUI(bus) {
     output.innerHTML = "";
   }
 
+  function updateMirror() {
+    const raw = input.value;
+    if (isMasked) {
+      typedText.textContent = raw.replace(/[^\n]/g, "*");
+      return;
+    }
+    typedText.textContent = raw;
+  }
+
+  function insertNewline() {
+    const start = input.selectionStart ?? input.value.length;
+    const end = input.selectionEnd ?? input.value.length;
+    const value = input.value;
+    input.value = `${value.slice(0, start)}\n${value.slice(end)}`;
+    const cursor = start + 1;
+    input.setSelectionRange(cursor, cursor);
+    updateMirror();
+  }
+
   function submitCommand() {
     bus.emit("command:submit", { raw: input.value });
     input.value = "";
+    updateMirror();
     input.focus();
   }
 
   function bindInput() {
-    terminal?.addEventListener("pointerdown", (event) => {
-      if (event.target.closest("a, button, input, textarea, select")) {
-        return;
-      }
-      input.focus();
-    });
-
     form.addEventListener("submit", (event) => {
       event.preventDefault();
       submitCommand();
     });
 
+    input.addEventListener("input", () => {
+      updateMirror();
+    });
+
     input.addEventListener("keydown", (event) => {
+      if (event.key === "Tab") {
+        event.preventDefault();
+        insertNewline();
+        return;
+      }
+
       if (event.key === "Enter") {
+        if (event.shiftKey) {
+          return;
+        }
         event.preventDefault();
         submitCommand();
       }
@@ -51,10 +78,12 @@ export function createTerminalUI(bus) {
   bus.on("output:append", (text) => appendLine(text));
   bus.on("output:clear", () => clearOutput());
   bus.on("input:mask", () => {
-    input.type = "password";
+    isMasked = true;
+    updateMirror();
   });
   bus.on("input:unmask", () => {
-    input.type = "text";
+    isMasked = false;
+    updateMirror();
   });
   bus.on("input:placeholder", (text) => {
     input.placeholder = text ?? "";
@@ -62,6 +91,7 @@ export function createTerminalUI(bus) {
   bus.on("input:focus", () => input.focus());
 
   bindInput();
+  updateMirror();
 
   function showIntro() {
     WELCOME_LINES.forEach((line) => appendLine(line));
