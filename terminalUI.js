@@ -5,6 +5,7 @@ const WELCOME_LINES = [
 
 export function createTerminalUI(bus) {
   const output = document.getElementById("output");
+  const terminal = document.querySelector(".terminal");
   const form = document.getElementById("command-form");
   const input = document.getElementById("command-input");
   const typedText = document.getElementById("typedText");
