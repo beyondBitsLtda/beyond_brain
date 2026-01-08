@@ -1,6 +1,14 @@
 import { getSupabaseClient } from "../supabaseClient.js";
 import { clearSession } from "../sessionStore.js";
 
+const UUID_REGEX =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const selectionRegex = /^#(\d+)$/;
+const lastDisambiguation = {
+  from: [],
+  to: [],
+};
+
 function parseQuotedValue(value) {
   if (!value) return "";
   return value.replace(/^"|"$/g, "").trim();
@@ -56,6 +64,84 @@ function formatRelation(rel) {
   return `- (${rel.type}) ${rel.from_note_id} -> ${rel.to_note_id}`;
 }
 
+function formatDisambiguationOption(option, index) {
+  const createdAt = option.created_at ? ` (${option.created_at})` : "";
+  return `[${index + 1}] ${option.subject}${createdAt}`;
+}
+
+async function resolveNoteReference({
+  input,
+  client,
+  userId,
+  bus,
+  disambiguation,
+  label,
+}) {
+  if (!input) {
+    bus.emit("output:append", `Parâmetro ${label} ausente.`);
+    return null;
+  }
+
+  const trimmed = input.trim();
+  const selectionMatch = selectionRegex.exec(trimmed);
+  if (selectionMatch) {
+    const selectionIndex = Number(selectionMatch[1]);
+    const options = disambiguation[label] ?? [];
+    if (!options.length) {
+      bus.emit(
+        "output:append",
+        `Nenhuma seleção disponível para ${label}. Informe o subject para gerar opções.`
+      );
+      return null;
+    }
+    if (Number.isNaN(selectionIndex) || selectionIndex < 1 || selectionIndex > options.length) {
+      bus.emit(
+        "output:append",
+        `Seleção inválida para ${label}. Use ${label}="#1" até ${label}="#${options.length}".`
+      );
+      return null;
+    }
+    const selected = options[selectionIndex - 1];
+    return { id: selected.id, subject: selected.subject };
+  }
+
+  if (UUID_REGEX.test(trimmed)) {
+    return { id: trimmed, subject: trimmed };
+  }
+
+  const { data, error } = await client
+    .from("notes")
+    .select("id,subject,created_at")
+    .eq("subject", trimmed)
+    .eq("user_id", userId)
+    .order("created_at", { ascending: true });
+
+  if (error) {
+    bus.emit("output:append", `Erro ao buscar nota por subject: ${error.message}`);
+    return null;
+  }
+
+  if (!data || data.length === 0) {
+    bus.emit("output:append", `Nota não encontrada para subject: ${trimmed}`);
+    return null;
+  }
+
+  if (data.length === 1) {
+    return { id: data[0].id, subject: data[0].subject };
+  }
+
+  disambiguation[label] = data;
+  bus.emit("output:append", `Mais de uma nota encontrada para subject: ${trimmed}`);
+  data
+    .map((option, index) => formatDisambiguationOption(option, index))
+    .forEach((line) => bus.emit("output:append", line));
+  bus.emit(
+    "output:append",
+    `Use LINK ${label}="#1" ... para selecionar.`
+  );
+  return null;
+}
+
 export function linkCommand(bus) {
   return async ({ raw = "" } = {}) => {
     const { client, error } = getSupabaseClient();
@@ -75,12 +161,40 @@ export function linkCommand(bus) {
     if (!from || !to || !type) {
       bus.emit(
         "output:append",
-        "Uso: LINK from=\"uuid\" to=\"uuid\" type=\"...\""
+        "Uso: LINK from=\"uuid|subject\" to=\"uuid|subject\" type=\"...\""
       );
       return;
     }
 
-    const noteCheck = await ensureOwnedNotes(client, user.id, [from, to]);
+    const resolvedFrom = await resolveNoteReference({
+      input: from,
+      client,
+      userId: user.id,
+      bus,
+      disambiguation: lastDisambiguation,
+      label: "from",
+    });
+    if (!resolvedFrom) return;
+
+    const resolvedTo = await resolveNoteReference({
+      input: to,
+      client,
+      userId: user.id,
+      bus,
+      disambiguation: lastDisambiguation,
+      label: "to",
+    });
+    if (!resolvedTo) return;
+
+    if (resolvedFrom.id === resolvedTo.id) {
+      bus.emit("output:append", "Não é permitido criar relação entre a mesma nota.");
+      return;
+    }
+
+    const noteCheck = await ensureOwnedNotes(client, user.id, [
+      resolvedFrom.id,
+      resolvedTo.id,
+    ]);
     if (!noteCheck.ok) {
       bus.emit(
         "output:append",
@@ -92,8 +206,8 @@ export function linkCommand(bus) {
     const { data: existing, error: existingError } = await client
       .from("note_relations")
       .select("id")
-      .eq("from_note_id", from)
-      .eq("to_note_id", to)
+      .eq("from_note_id", resolvedFrom.id)
+      .eq("to_note_id", resolvedTo.id)
       .eq("type", type)
       .eq("user_id", user.id)
       .limit(1)
@@ -111,7 +225,12 @@ export function linkCommand(bus) {
 
     const { error: insertError } = await client
       .from("note_relations")
-      .insert({ from_note_id: from, to_note_id: to, type, user_id: user.id });
+      .insert({
+        from_note_id: resolvedFrom.id,
+        to_note_id: resolvedTo.id,
+        type,
+        user_id: user.id,
+      });
 
     if (insertError) {
       if (insertError.code === "23505") {
@@ -122,7 +241,10 @@ export function linkCommand(bus) {
       return;
     }
 
-    bus.emit("output:append", `Relação criada: (${type}) ${from} -> ${to}`);
+    bus.emit(
+      "output:append",
+      `Relação criada: (${type}) ${resolvedFrom.id} -> ${resolvedTo.id}`
+    );
     bus.emit("graph:refresh");
   };
 }
