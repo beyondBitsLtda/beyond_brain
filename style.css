@@ -36,15 +36,24 @@ body {
 
 .terminal__body {
   position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  min-height: 60vh;
+}
+
+.terminal__output-area {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  max-height: 72vh;
 }
 
 .terminal__screen {
-  min-height: 60vh;
-  max-height: 72vh;
+  height: 100%;
   overflow-y: auto;
   padding: 0.5rem;
   border: 1px solid #0f0;
-  margin-bottom: 1rem;
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
@@ -57,12 +66,15 @@ body {
 }
 
 .terminal__input-row {
-  position: relative;
+  position: sticky;
+  bottom: 0;
   display: flex;
   align-items: flex-start;
   gap: 0.5rem;
   border: 1px solid #0f0;
   padding: 0.5rem;
+  background: #000;
+  z-index: 3;
 }
 
 .terminal__prompt {
@@ -87,22 +99,7 @@ body {
   border: none;
   outline: none;
   font: inherit;
-  caret-color: transparent;
-  opacity: 0;
-}
-
-.terminal__cursor {
-  width: 10px;
-  height: 1.2em;
-  background: #0f0;
-  animation: blink 1s steps(1) infinite;
-  align-self: flex-start;
-}
-
-@keyframes blink {
-  50% {
-    opacity: 0;
-  }
+  caret-color: #0f0;
 }
 
 .graph-overlay {
