@@ -29,11 +29,13 @@ import { steveCommand } from "./commands/steve.js";
 import { starCommand } from "./commands/star.js";
 import { xpCommand } from "./commands/xp.js";
 import { iaCommand } from "./commands/ia.js";
+import { createMicController } from "./voice/micController.js";
 
 const bus = createEventBus();
 const focusManager = createFocusManager(bus);
 const initialTheme = loadTheme();
 const petManager = createPetManager(bus);
+const micController = createMicController(bus);
 
 const ui = createTerminalUI(bus);
 ui.showIntro();
@@ -77,6 +79,7 @@ const commands = {
   xp: xpCommand(bus),
   IA: iaCommand(bus),
   ia: iaCommand(bus),
+  mic: () => micController.open(),
 };
 
 createCommandRouter(bus, commands);

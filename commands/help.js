@@ -21,7 +21,8 @@ const HELP_TEXT = `Comandos disponíveis:
 - RESET BRAIN: remove todas as notas e relações do usuário (NUKE BRAIN também funciona)
 - theme: escolhe um tema de cores (1-8)
 - pet: entra no modo pet (pet name "NOME" | pet reset)
-- IA: comandos de inteligência artificial (IA help)`;
+- IA: comandos de inteligência artificial (IA help)
+- mic: dita uma nota rápida por voz (salva como Quick Thought)`;
 
 export function helpCommand(bus) {
   return () => {
