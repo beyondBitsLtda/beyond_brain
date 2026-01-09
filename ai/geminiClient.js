@@ -1,5 +1,6 @@
-const GEMINI_MODEL = "gemini-pro";
-const GEMINI_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
+import { GEMINI_API_VERSION, GEMINI_MODEL } from "./geminiModel.js";
+
+const GEMINI_ENDPOINT = `https://generativelanguage.googleapis.com/${GEMINI_API_VERSION}/models/${GEMINI_MODEL}:generateContent`;
 
 function buildRequestBody(prompt) {
   return {
