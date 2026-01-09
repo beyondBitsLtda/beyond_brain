@@ -7,7 +7,7 @@ import {
   setGeminiKey,
 } from "../ai/aiConfig.js";
 import { requestGeminiText } from "../ai/geminiClient.js";
-import { GEMINI_API_VERSION, GEMINI_MODEL } from "../ai/geminiModel.js";
+import { GEMINI_API_VERSION, GEMINI_MODEL } from "../ai/geminiConfig.js";
 
 const MIN_KEY_LENGTH = 20;
 const MAX_OUTPUT_LENGTH = 1200;
