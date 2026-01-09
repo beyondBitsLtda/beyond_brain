@@ -1,4 +1,4 @@
-import { GEMINI_API_VERSION, GEMINI_MODEL } from "./geminiModel.js";
+import { GEMINI_API_VERSION, GEMINI_MODEL } from "./geminiConfig.js";
 
 const GEMINI_ENDPOINT = `https://generativelanguage.googleapis.com/${GEMINI_API_VERSION}/models/${GEMINI_MODEL}:generateContent`;
 
