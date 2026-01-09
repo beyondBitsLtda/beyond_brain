@@ -68,3 +68,7 @@ export async function requestGeminiText({ prompt, apiKey }) {
 
   return String(text).trim();
 }
+
+export async function generateText(prompt, apiKey) {
+  return requestGeminiText({ prompt, apiKey });
+}
