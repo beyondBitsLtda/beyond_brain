@@ -7,6 +7,7 @@ import {
   setGeminiKey,
 } from "../ai/aiConfig.js";
 import { requestGeminiText } from "../ai/geminiClient.js";
+import { GEMINI_API_VERSION, GEMINI_MODEL } from "../ai/geminiModel.js";
 
 const MIN_KEY_LENGTH = 20;
 const MAX_OUTPUT_LENGTH = 1200;
@@ -205,6 +206,7 @@ export function iaCommand(bus) {
       const apiKey = ensureGeminiKey(bus);
       if (!apiKey) return;
 
+      bus.emit("output:append", `IA model: ${GEMINI_MODEL} (${GEMINI_API_VERSION})`);
       const response = await callGemini(bus, "Responda apenas OK.", apiKey);
       if (!response) return;
       if (response === "OK") {
