@@ -207,7 +207,7 @@ export function iaCommand(bus) {
 
       const response = await callGemini(bus, "Responda apenas OK.", apiKey);
       if (!response) return;
-      if (response.trim().toUpperCase() === "OK") {
+      if (response === "OK") {
         bus.emit("output:append", "OK");
         return;
       }
