@@ -1,6 +1,7 @@
 import { getSupabaseClient } from "./supabaseClient.js";
 import { clearSession } from "./sessionStore.js";
 import { getCurrentTheme } from "./themeManager.js";
+import { createGraphNoteWindow } from "./graphNoteWindow.js";
 
 const LABEL_LIMIT = 24;
 const DEPTH_MIN = 1;
@@ -80,12 +81,14 @@ export function createGraphUI(bus, focusManager) {
   const detailSubject = document.getElementById("graph-detail-subject");
   const detailMoment = document.getElementById("graph-detail-moment");
   const detailCreated = document.getElementById("graph-detail-created");
+  const noteWindow = createGraphNoteWindow(overlay);
 
   let cy = null;
   let isOpen = false;
   let lastOptions = { focusNoteId: null, depth: DEPTH_MIN };
   let edgePulseFrame = null;
   let edgePulseStart = null;
+  let noteBodies = new Map();
 
   function getThemeTokens() {
     const styles = getComputedStyle(document.documentElement);
@@ -274,7 +277,9 @@ export function createGraphUI(bus, focusManager) {
     });
 
     cy.on("tap", "node", (event) => {
-      showDetails(event.target.data());
+      const data = event.target.data();
+      showDetails(data);
+      noteWindow.open(noteBodies.get(data.id) ?? "");
     });
 
     cy.on("tap", (event) => {
@@ -325,7 +330,7 @@ export function createGraphUI(bus, focusManager) {
     const [notesResponse, relsResponse] = await Promise.all([
       clientResponse.client
         .from("notes")
-        .select("id,subject,moment,created_at")
+        .select("id,subject,moment,created_at,body")
         .eq("user_id", user.id)
         .order("created_at", { ascending: false }),
       clientResponse.client
@@ -345,6 +350,7 @@ export function createGraphUI(bus, focusManager) {
 
     const notes = notesResponse.data ?? [];
     const relations = relsResponse.data ?? [];
+    noteBodies = new Map(notes.map((note) => [note.id, note.body ?? ""]));
 
     if (notes.length === 0) {
       emptyState.hidden = false;
@@ -393,6 +399,7 @@ export function createGraphUI(bus, focusManager) {
   function closeGraph() {
     overlay.hidden = true;
     isOpen = false;
+    noteWindow.close();
     stopSteveEdgePulse();
   }
 
