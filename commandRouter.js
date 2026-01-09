@@ -9,6 +9,13 @@ export function createCommandRouter(bus, commands = {}) {
     capture = null;
   });
 
+  bus.on("input:escape", () => {
+    if (!capture?.onCancel) {
+      return;
+    }
+    capture.onCancel();
+  });
+
   bus.on("command:submit", ({ raw }) => {
     const input = raw ?? "";
 
