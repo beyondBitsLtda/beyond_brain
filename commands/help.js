@@ -20,7 +20,8 @@ const HELP_TEXT = `Comandos disponíveis:
 - focus "uuid" | focus clear: define ou limpa o modo foco
 - RESET BRAIN: remove todas as notas e relações do usuário (NUKE BRAIN também funciona)
 - theme: escolhe um tema de cores (1-8)
-- pet: entra no modo pet (pet name "NOME" | pet reset)`;
+- pet: entra no modo pet (pet name "NOME" | pet reset)
+- IA: comandos de inteligência artificial (IA help)`;
 
 export function helpCommand(bus) {
   return () => {

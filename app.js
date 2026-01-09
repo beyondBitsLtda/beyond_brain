@@ -28,6 +28,7 @@ import { petCommand } from "./commands/pet.js";
 import { steveCommand } from "./commands/steve.js";
 import { starCommand } from "./commands/star.js";
 import { xpCommand } from "./commands/xp.js";
+import { iaCommand } from "./commands/ia.js";
 
 const bus = createEventBus();
 const focusManager = createFocusManager(bus);
@@ -74,6 +75,8 @@ const commands = {
   steve: steveCommand(bus),
   star: starCommand(bus),
   xp: xpCommand(bus),
+  IA: iaCommand(bus),
+  ia: iaCommand(bus),
 };
 
 createCommandRouter(bus, commands);

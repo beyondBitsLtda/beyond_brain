@@ -163,6 +163,14 @@ export function createTerminalUI(bus) {
     });
 
     input.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        bus.emit("input:escape");
+        input.value = "";
+        updateMirror();
+        return;
+      }
+
       if (event.key === "ArrowUp") {
         event.preventDefault();
         applyHistoryStep(-1);
