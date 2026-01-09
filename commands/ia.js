@@ -15,6 +15,19 @@ import {
   recordPairBrainTurn,
   startPairBrainSession,
 } from "../ai/pairBrainSession.js";
+import {
+  SEMINAR_LIMITS,
+  applySafetyFilters,
+  enforceLimits,
+  fetchNotes,
+  requestSuggestionsFromGemini,
+  validateAndNormalize,
+} from "../ai/seminarEngine.js";
+import {
+  clearSeminarState,
+  getSeminarState,
+  setSeminarState,
+} from "../ai/seminarState.js";
 
 const MIN_KEY_LENGTH = 20;
 const MAX_OUTPUT_LENGTH = 1200;
@@ -25,6 +38,7 @@ const PAIR_BRAIN_MIN_COUNT = 1;
 const PAIR_BRAIN_MAX_COUNT = 20;
 const PAIR_BRAIN_DEFAULT_COUNT = 3;
 const NOTE_FIELDS = ["id", "subject", "moment", "body", "created_at"];
+const SEMINAR_ALLOWED_SELECTION = /^[0-9,\s]+$/;
 
 function emitPrompt(bus, label, { masked = false, placeholder = "" } = {}) {
   bus.emit("output:append", label);
@@ -202,6 +216,122 @@ function buildSuggestLinksPrompt(notes) {
     "Notas:",
     list,
   ].join("\n");
+}
+
+function formatSeminarScope(scope) {
+  if (!scope) return "n/a";
+  if (scope.type === "today") return "today (24h)";
+  if (scope.type === "week") return "week (7d)";
+  if (scope.type === "last") return `last ${scope.count}`;
+  return scope.type ?? "n/a";
+}
+
+function parseSeminarCommand(raw) {
+  const match = raw.trim().match(/^ia\s+seminar(?:\s+(.+))?$/i);
+  if (!match) return null;
+  const args = (match[1] ?? "").trim();
+  if (!args) {
+    return {
+      action: "preview",
+      scope: { type: "last", count: SEMINAR_LIMITS.DEFAULT_LAST_COUNT },
+    };
+  }
+
+  const normalized = args.toLowerCase();
+  if (normalized === "status") {
+    return { action: "status" };
+  }
+  if (normalized === "today") {
+    return { action: "preview", scope: { type: "today" } };
+  }
+  if (normalized === "week") {
+    return { action: "preview", scope: { type: "week" } };
+  }
+  if (normalized === "discard") {
+    return { action: "discard" };
+  }
+
+  const lastMatch = normalized.match(/^last\s+(\d+)$/);
+  if (lastMatch) {
+    const count = Number.parseInt(lastMatch[1], 10);
+    if (
+      Number.isNaN(count) ||
+      count < SEMINAR_LIMITS.MIN_LAST_COUNT ||
+      count > SEMINAR_LIMITS.MAX_LAST_COUNT
+    ) {
+      return { error: "Uso: IA seminar last N (N entre 5 e 50)." };
+    }
+    return { action: "preview", scope: { type: "last", count } };
+  }
+
+  const applyMatch = normalized.match(/^apply\s+(.+)$/);
+  if (applyMatch) {
+    const selection = applyMatch[1].trim();
+    if (selection === "all") {
+      return { action: "apply", selection: "all" };
+    }
+    if (!SEMINAR_ALLOWED_SELECTION.test(selection)) {
+      return { error: "Seleção inválida. Use: IA seminar apply all | 1,3,5" };
+    }
+    const indices = selection
+      .split(",")
+      .map((value) => Number.parseInt(value.trim(), 10))
+      .filter((value) => Number.isFinite(value));
+    if (!indices.length) {
+      return { error: "Seleção inválida. Use: IA seminar apply all | 1,3,5" };
+    }
+    return { action: "apply", selection: indices };
+  }
+
+  return {
+    error:
+      "Uso: IA seminar | IA seminar last N | IA seminar today | IA seminar week | IA seminar status | IA seminar apply all | IA seminar apply 1,3 | IA seminar discard",
+  };
+}
+
+function formatSeminarSuggestion(suggestion, index) {
+  const fromLabel = suggestion.fromSubject || suggestion.fromId;
+  const toLabel = suggestion.toSubject || suggestion.toId;
+  const confidence = suggestion.confidence.toFixed(2);
+  return [
+    `[${index + 1}] "${fromLabel}" -> "${toLabel}" (type=${suggestion.type}, conf=${confidence})`,
+    `    reason: ${suggestion.reason || "sem razão"}`,
+  ];
+}
+
+function parseSelection(selection, total) {
+  if (selection === "all") {
+    return Array.from({ length: total }, (_, index) => index + 1);
+  }
+  const unique = new Set();
+  for (const value of selection) {
+    if (!Number.isInteger(value) || value < 1 || value > total) {
+      return null;
+    }
+    unique.add(value);
+  }
+  return [...unique];
+}
+
+async function ensureOwnedNotes(client, userId, noteIds) {
+  const uniqueIds = [...new Set(noteIds.filter(Boolean))];
+  if (!uniqueIds.length) {
+    return { ok: false, missing: [] };
+  }
+
+  const { data, error } = await client
+    .from("notes")
+    .select("id")
+    .in("id", uniqueIds)
+    .eq("user_id", userId);
+
+  if (error) {
+    return { ok: false, missing: uniqueIds, error };
+  }
+
+  const foundIds = new Set((data ?? []).map((note) => note.id));
+  const missing = uniqueIds.filter((id) => !foundIds.has(id));
+  return { ok: missing.length === 0, missing };
 }
 
 function buildSummarizeTodayPrompt(notes) {
@@ -583,6 +713,8 @@ export function iaCommand(bus) {
           "- IA suggest links [LIMIT n]: sugere comandos LINK",
           "- IA summarize today: resume notas das últimas 24h",
           '- IA title note id="uuid": sugere 3 titles para a nota',
+          "- IA seminar: sugere links em modo semiautomático (preview)",
+          "- IA seminar last N | today | week | status | apply | discard",
         ].join("\n")
       );
       return;
@@ -686,6 +818,250 @@ export function iaCommand(bus) {
 
       await showPairBrainQuestion(bus, apiKey, client, user.id);
       return;
+    }
+
+    if (normalized.startsWith("ia seminar")) {
+      const parsed = parseSeminarCommand(trimmed);
+      if (parsed?.error) {
+        bus.emit("output:append", parsed.error);
+        return;
+      }
+
+      if (parsed?.action === "status") {
+        const state = getSeminarState();
+        bus.emit("output:append", "Seminário — status:");
+        bus.emit("output:append", `- Escopo: ${formatSeminarScope(state.scope)}`);
+        bus.emit("output:append", `- Notas analisadas: ${state.noteCount ?? 0}`);
+        bus.emit(
+          "output:append",
+          `- Preview pendente: ${state.suggestions?.length ? "sim" : "não"}`
+        );
+        if (state.lastGeneratedAt) {
+          bus.emit("output:append", `- Gerado em: ${state.lastGeneratedAt}`);
+        }
+        if (state.appliedIds?.length) {
+          bus.emit("output:append", `- Aplicados: ${state.appliedIds.length}`);
+        }
+        return;
+      }
+
+      if (parsed?.action === "discard") {
+        const state = getSeminarState();
+        if (!state.suggestions?.length) {
+          bus.emit("output:append", "Seminário: nenhum preview pendente.");
+          return;
+        }
+        clearSeminarState();
+        bus.emit("output:append", "Seminário: preview descartado.");
+        return;
+      }
+
+      const { client, error } = getSupabaseClient();
+      if (error || !client) {
+        bus.emit(
+          "output:append",
+          "Supabase não configurado. Use auth --register ou auth para autenticar."
+        );
+        return;
+      }
+
+      const user = await getAuthenticatedUser(bus, client);
+      if (!user) return;
+
+      if (parsed?.action === "apply") {
+        const state = getSeminarState();
+        if (!state.suggestions?.length) {
+          bus.emit("output:append", "Seminário: nenhum preview pendente.");
+          return;
+        }
+
+        const selection = parseSelection(parsed.selection, state.suggestions.length);
+        if (!selection) {
+          bus.emit(
+            "output:append",
+            "Seleção inválida. Use: IA seminar apply all | 1,3,5"
+          );
+          return;
+        }
+
+        const pendingSelection = selection.filter(
+          (index) => !state.appliedIds?.includes(index)
+        );
+
+        if (!pendingSelection.length) {
+          bus.emit("output:append", "Seminário: itens selecionados já aplicados.");
+          return;
+        }
+
+        const pendingSuggestions = pendingSelection.map(
+          (index) => state.suggestions[index - 1]
+        );
+
+        const noteIds = pendingSuggestions.flatMap((suggestion) => [
+          suggestion.fromId,
+          suggestion.toId,
+        ]);
+
+        const ownership = await ensureOwnedNotes(client, user.id, noteIds);
+        if (ownership.error) {
+          bus.emit(
+            "output:append",
+            `Erro ao validar notas: ${ownership.error.message}`
+          );
+          return;
+        }
+
+        const missingNoteIds = new Set(ownership.missing ?? []);
+        const missingSelections = [];
+        const actionableSuggestions = [];
+        pendingSuggestions.forEach((suggestion, idx) => {
+          const selectionIndex = pendingSelection[idx];
+          if (
+            missingNoteIds.has(suggestion.fromId) ||
+            missingNoteIds.has(suggestion.toId)
+          ) {
+            missingSelections.push(selectionIndex);
+          } else {
+            actionableSuggestions.push({ ...suggestion, selectionIndex });
+          }
+        });
+
+        if (missingSelections.length) {
+          bus.emit(
+            "output:append",
+            `Aviso: ${missingSelections.length} sugestões ignoradas por nota ausente.`
+          );
+        }
+
+        let inserted = 0;
+        let skipped = 0;
+        let failed = 0;
+        const applied = [...(state.appliedIds ?? [])];
+
+        for (const suggestion of actionableSuggestions) {
+          const { selectionIndex, fromId, toId, type } = suggestion;
+          const { data: existing, error: existingError } = await client
+            .from("note_relations")
+            .select("id")
+            .eq("from_note_id", fromId)
+            .eq("to_note_id", toId)
+            .eq("type", type)
+            .eq("user_id", user.id)
+            .limit(1)
+            .maybeSingle();
+
+          if (existingError) {
+            failed += 1;
+            bus.emit(
+              "output:append",
+              `Erro ao verificar relação [${selectionIndex}]: ${existingError.message}`
+            );
+            continue;
+          }
+
+          if (existing) {
+            skipped += 1;
+            applied.push(selectionIndex);
+            continue;
+          }
+
+          const { error: insertError } = await client.from("note_relations").insert({
+            from_note_id: fromId,
+            to_note_id: toId,
+            type,
+            user_id: user.id,
+          });
+
+          if (insertError) {
+            failed += 1;
+            bus.emit(
+              "output:append",
+              `Erro ao aplicar relação [${selectionIndex}]: ${insertError.message}`
+            );
+            continue;
+          }
+
+          inserted += 1;
+          applied.push(selectionIndex);
+        }
+
+        setSeminarState({
+          ...state,
+          appliedIds: applied,
+        });
+
+        bus.emit(
+          "output:append",
+          `Seminário — aplicado: ${inserted}, duplicados: ${skipped}, erros: ${failed}.`
+        );
+        if (inserted > 0) {
+          bus.emit("graph:refresh");
+        }
+        return;
+      }
+
+      if (parsed?.action === "preview") {
+        const apiKey = ensureGeminiKey(bus);
+        if (!apiKey) return;
+
+        const { notes, error: notesError } = await fetchNotes({
+          client,
+          userId: user.id,
+          scope: parsed.scope,
+        });
+
+        if (notesError) {
+          bus.emit(
+            "output:append",
+            `Erro ao buscar notas: ${notesError.message}`
+          );
+          return;
+        }
+
+        if (!notes || notes.length === 0) {
+          bus.emit("output:append", "Seminário: nenhuma nota encontrada.");
+          return;
+        }
+
+        let rawLinks = [];
+        try {
+          rawLinks = await requestSuggestionsFromGemini(notes, apiKey);
+        } catch (error) {
+          bus.emit(
+            "output:append",
+            `ERR: ${error?.message ?? "Falha ao gerar sugestões."}`
+          );
+          return;
+        }
+
+        const normalizedLinks = validateAndNormalize(rawLinks);
+        const filtered = applySafetyFilters(normalizedLinks, notes);
+        const limited = enforceLimits(filtered);
+
+        setSeminarState({
+          lastGeneratedAt: new Date().toISOString(),
+          scope: parsed.scope,
+          noteCount: notes.length,
+          suggestions: limited,
+          appliedIds: [],
+        });
+
+        if (!limited.length) {
+          bus.emit("output:append", "Seminário — nenhuma sugestão encontrada.");
+          return;
+        }
+
+        bus.emit("output:append", "Seminário — sugestões encontradas (preview):");
+        limited
+          .flatMap((suggestion, index) => formatSeminarSuggestion(suggestion, index))
+          .forEach((line) => bus.emit("output:append", line));
+
+        bus.emit("output:append", "");
+        bus.emit("output:append", "- `IA seminar apply all`");
+        bus.emit("output:append", "- `IA seminar apply 1,2`");
+        bus.emit("output:append", "- `IA seminar discard`");
+        return;
+      }
     }
 
     if (normalized === "ia test") {
@@ -897,7 +1273,7 @@ export function iaCommand(bus) {
 
     bus.emit(
       "output:append",
-      'Uso: IA | IA help | IA test | IA off | IA ask "<pergunta>" | IA pair brain [N|endless] | IA insight note id="uuid" | IA suggest links [LIMIT n] | IA summarize today | IA title note id="uuid"'
+      'Uso: IA | IA help | IA test | IA off | IA ask "<pergunta>" | IA pair brain [N|endless] | IA insight note id="uuid" | IA suggest links [LIMIT n] | IA summarize today | IA title note id="uuid" | IA seminar ...'
     );
   };
 
