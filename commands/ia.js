@@ -20,7 +20,10 @@ const MIN_KEY_LENGTH = 20;
 const MAX_OUTPUT_LENGTH = 1200;
 const DEFAULT_SUGGEST_LIMIT = 10;
 const MAX_SUGGEST_LIMIT = 20;
-const PAIR_BRAIN_NOTE_LIMIT = 20;
+const PAIR_BRAIN_NOTE_LIMIT = 30;
+const PAIR_BRAIN_MIN_COUNT = 1;
+const PAIR_BRAIN_MAX_COUNT = 20;
+const PAIR_BRAIN_DEFAULT_COUNT = 3;
 const NOTE_FIELDS = ["id", "subject", "moment", "body", "created_at"];
 
 function emitPrompt(bus, label, { masked = false, placeholder = "" } = {}) {
@@ -84,26 +87,18 @@ function buildAskPrompt(question) {
   ].join("\n");
 }
 
-function buildPairBrainSelectionPrompt(notes) {
-  const list = notes
-    .map((note) => {
-      const body = (note.body ?? "").replace(/\s+/g, " ").trim();
-      const shortBody = body.length > 220 ? `${body.slice(0, 217)}...` : body;
-      return `- id=${note.id} | subject=${note.subject ?? ""} | moment=${
-        note.moment ?? ""
-      } | body=${shortBody}`;
-    })
-    .join("\n");
-
+function buildPairBrainQuestionPrompt(note) {
+  const body = (note.body ?? "").replace(/\s+/g, " ").trim();
+  const shortBody = body.length > 360 ? `${body.slice(0, 357)}...` : body;
   return [
-    "Você é um mentor crítico e construtivo.",
-    "Escolha 3 notas distintas (evite subject igual) e escreva 1 pergunta crítica por nota.",
-    "Responda SOMENTE com JSON estrito no formato:",
-    '{ "selected": [{"id":"...","subject":"..."}], "questions": [{"note_id":"...","q":"..."}] }',
-    "As perguntas devem ser específicas, diretas e revelar lacunas ou contradições.",
+    "Você é um crítico construtivo, direto e respeitoso.",
+    "Gere UMA pergunta específica sobre a nota.",
+    "A pergunta deve apontar lacunas, contradições ou próximos passos.",
+    "A resposta deve ter 1 parágrafo curto e terminar com '?'.",
     "",
-    "Notas disponíveis:",
-    list,
+    `Nota: ${note.subject ?? ""}`,
+    `Momento: ${note.moment ?? ""}`,
+    `Conteúdo: ${shortBody}`,
   ].join("\n");
 }
 
@@ -111,9 +106,9 @@ function buildPairBrainRebuttalPrompt(note, question, answer) {
   const body = (note.body ?? "").replace(/\s+/g, " ").trim();
   const shortBody = body.length > 240 ? `${body.slice(0, 237)}...` : body;
   return [
-    "Você é um advogado do diabo, crítico e direto, sem agressividade.",
-    "Gere uma retruca curta (até 5 linhas) que provoque clareza e ação.",
-    "Não faça nova pergunta.",
+    "Você é um crítico construtivo, direto e respeitoso.",
+    "Retruca de forma incisiva, sem fazer nova pergunta.",
+    "Máximo de 5 linhas. Seja curto e terminal-friendly.",
     "",
     `Nota: ${note.subject ?? ""}`,
     `Contexto: ${shortBody}`,
@@ -135,68 +130,20 @@ function buildPairBrainClosingPrompt(history) {
       if (entry.rebuttal) {
         base.push(`Retruca: ${entry.rebuttal}`);
       }
+      if (entry.skipped) {
+        base.push("Resposta: [skip]");
+      }
       return base.join(" | ");
     })
     .join("\n");
 
   return [
     "Com base no diálogo abaixo, gere um fechamento curto.",
-    'A resposta deve começar com: "O que eu acho que você deve fazer agora:".',
-    "Seja direto, no máximo 2 linhas.",
+    'Comece com: "O que você deve fazer agora:"',
+    "Use 1 a 3 bullets curtos.",
     "",
     items,
   ].join("\n");
-}
-
-function extractJsonPayload(text) {
-  if (!text) return null;
-  try {
-    return JSON.parse(text);
-  } catch (error) {
-    const start = text.indexOf("{");
-    const end = text.lastIndexOf("}");
-    if (start === -1 || end === -1 || end <= start) {
-      return null;
-    }
-    try {
-      return JSON.parse(text.slice(start, end + 1));
-    } catch (innerError) {
-      return null;
-    }
-  }
-}
-
-function validatePairBrainSelection(payload, noteMap) {
-  const selected = Array.isArray(payload?.selected) ? payload.selected : null;
-  const questions = Array.isArray(payload?.questions) ? payload.questions : null;
-  if (!selected || !questions || selected.length !== 3 || questions.length !== 3) {
-    return null;
-  }
-
-  const uniqueSubjects = new Set();
-  const selectedNotes = [];
-  for (const item of selected) {
-    const note = noteMap.get(item?.id);
-    if (!note) return null;
-    const subjectKey = String(note.subject ?? "").trim().toLowerCase();
-    if (subjectKey && uniqueSubjects.has(subjectKey)) {
-      return null;
-    }
-    if (subjectKey) uniqueSubjects.add(subjectKey);
-    selectedNotes.push(note);
-  }
-
-  const questionMap = new Map();
-  for (const item of questions) {
-    if (!item?.note_id || !item?.q) return null;
-    if (!noteMap.has(item.note_id)) return null;
-    questionMap.set(item.note_id, String(item.q).trim());
-  }
-
-  const orderedQuestions = selectedNotes.map((note) => questionMap.get(note.id));
-  if (orderedQuestions.some((q) => !q)) return null;
-
-  return { notes: selectedNotes, questions: orderedQuestions };
 }
 
 async function getAuthenticatedUser(bus, client) {
@@ -298,70 +245,180 @@ async function callGemini(bus, prompt, apiKey) {
   }
 }
 
-async function selectPairBrainNotes(bus, notes, apiKey) {
-  const noteMap = new Map(notes.map((note) => [note.id, note]));
-  const prompt = buildPairBrainSelectionPrompt(notes);
+function parsePairBrainArgs(raw) {
+  const match = raw.trim().match(/^ia\s+pair\s+brain(?:\s+(.+))?$/i);
+  if (!match) return null;
+  const arg = (match[1] ?? "").trim();
+  if (!arg) {
+    return { mode: "fixed", targetCount: PAIR_BRAIN_DEFAULT_COUNT };
+  }
+  if (arg.toLowerCase() === "endless") {
+    return { mode: "endless", targetCount: null };
+  }
+  if (/^\d+$/.test(arg)) {
+    const parsed = Number.parseInt(arg, 10);
+    const clamped = Math.min(
+      PAIR_BRAIN_MAX_COUNT,
+      Math.max(PAIR_BRAIN_MIN_COUNT, parsed)
+    );
+    return { mode: "fixed", targetCount: clamped };
+  }
+  return { error: "Uso: IA pair brain [N|endless]" };
+}
 
-  let response = null;
+function formatPairBrainProgress(session) {
+  const current = session.currentIndex + 1;
+  if (session.mode === "endless") {
+    return `Pergunta ${current}/∞`;
+  }
+  const total = session.targetCount ?? 0;
+  return `Nota ${current}/${total}`;
+}
+
+async function fetchPairBrainNotes(bus, client, userId) {
+  let data = null;
+  let queryError = null;
+  ({ data, error: queryError } = await client
+    .from("notes")
+    .select(NOTE_FIELDS.join(","))
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false })
+    .order("id", { ascending: false })
+    .limit(PAIR_BRAIN_NOTE_LIMIT));
+
+  if (queryError) {
+    ({ data, error: queryError } = await client
+      .from("notes")
+      .select(NOTE_FIELDS.join(","))
+      .eq("user_id", userId)
+      .order("id", { ascending: false })
+      .limit(PAIR_BRAIN_NOTE_LIMIT));
+  }
+
+  if (queryError) {
+    bus.emit("output:append", `Erro ao buscar notas: ${queryError.message}`);
+    return null;
+  }
+
+  return (data ?? []).filter((note) => (note.body ?? "").trim());
+}
+
+async function generatePairBrainQuestion(bus, apiKey, note) {
   try {
-    response = await generateText(prompt, apiKey);
+    const question = await generateText(buildPairBrainQuestionPrompt(note), apiKey);
+    return truncateOutput(question);
   } catch (error) {
     const message = error?.message ?? "Erro desconhecido.";
     bus.emit("output:append", `ERR: ${message}`);
+    bus.emit("output:append", "ERR: IA indisponível, encerrando Pair Brain.");
     return null;
   }
-
-  let payload = extractJsonPayload(response);
-  let selection = validatePairBrainSelection(payload, noteMap);
-  if (!selection) {
-    const retryPrompt = [
-      "Retorne apenas JSON válido conforme o esquema.",
-      '{ "selected": [{"id":"...","subject":"..."}], "questions": [{"note_id":"...","q":"..."}] }',
-      "",
-      `Texto anterior: ${response}`,
-    ].join("\n");
-
-    try {
-      response = await generateText(retryPrompt, apiKey);
-    } catch (error) {
-      const message = error?.message ?? "Erro desconhecido.";
-      bus.emit("output:append", `ERR: ${message}`);
-      return null;
-    }
-
-    payload = extractJsonPayload(response);
-    selection = validatePairBrainSelection(payload, noteMap);
-  }
-
-  if (!selection) {
-    bus.emit("output:append", "ERR: não foi possível preparar o Pair Brain.");
-    return null;
-  }
-
-  return selection;
 }
 
-function showPairBrainQuestion(bus, apiKey) {
+async function generatePairBrainRebuttal(bus, apiKey, note, question, answer) {
+  try {
+    const rebuttal = await generateText(
+      buildPairBrainRebuttalPrompt(note, question, answer),
+      apiKey
+    );
+    return truncateOutput(rebuttal);
+  } catch (error) {
+    const message = error?.message ?? "Erro desconhecido.";
+    bus.emit("output:append", `ERR: ${message}`);
+    bus.emit("output:append", "ERR: IA indisponível, encerrando Pair Brain.");
+    return null;
+  }
+}
+
+async function generatePairBrainClosing(bus, apiKey, history) {
+  try {
+    const closing = await generateText(buildPairBrainClosingPrompt(history), apiKey);
+    return truncateOutput(closing);
+  } catch (error) {
+    const message = error?.message ?? "Erro desconhecido.";
+    bus.emit("output:append", `ERR: ${message}`);
+    bus.emit("output:append", "ERR: IA indisponível, encerrando Pair Brain.");
+    return null;
+  }
+}
+
+async function pickNextEndlessNote(bus, client, userId) {
   const session = getPairBrainSession();
-  const note = session.notes[session.index];
-  const question = session.questions[session.index];
-  if (!note || !question) {
-    bus.emit("output:append", "ERR: sessão inconsistente. Encerrando.");
+  let pool = session.pool;
+  if (!pool.length || session.usedNoteIds.size >= pool.length) {
+    const refreshed = await fetchPairBrainNotes(bus, client, userId);
+    if (!refreshed || !refreshed.length) return null;
+    session.pool = refreshed;
+    session.usedNoteIds = new Set();
+    pool = refreshed;
+  }
+
+  const lastId = session.lastNoteId;
+  let candidate = pool.find(
+    (note) => !session.usedNoteIds.has(note.id) && note.id !== lastId
+  );
+
+  if (!candidate) {
+    const fallback = pool.find((note) => !session.usedNoteIds.has(note.id));
+    if (fallback && fallback.id !== lastId) {
+      candidate = fallback;
+    }
+  }
+
+  if (!candidate) {
+    const refreshed = await fetchPairBrainNotes(bus, client, userId);
+    if (!refreshed || !refreshed.length) return null;
+    session.pool = refreshed;
+    session.usedNoteIds = new Set();
+    candidate = refreshed.find((note) => note.id !== lastId) ?? null;
+  }
+
+  if (!candidate) return null;
+  session.usedNoteIds.add(candidate.id);
+  session.lastNoteId = candidate.id;
+  return candidate;
+}
+
+async function showPairBrainQuestion(bus, apiKey, client, userId) {
+  const session = getPairBrainSession();
+  let note = null;
+
+  if (session.mode === "fixed") {
+    note = session.pool[session.currentIndex] ?? null;
+  } else {
+    note = await pickNextEndlessNote(bus, client, userId);
+  }
+
+  if (!note) {
+    bus.emit(
+      "output:append",
+      "Sem notas com conteúdo suficiente para continuar o Pair Brain."
+    );
+    finishCapture(bus);
     clearPairBrainSession();
-    bus.emit("router:capture:stop");
     return;
   }
 
-  session.phase = "await_user";
-  session.lastQuestion = question;
-  bus.emit("output:append", `Nota ${session.index + 1}/3: ${note.subject ?? ""}`);
-  bus.emit("output:append", `Q${session.index + 1}: ${question}`);
+  const question = await generatePairBrainQuestion(bus, apiKey, note);
+  if (!question) {
+    finishCapture(bus);
+    clearPairBrainSession();
+    return;
+  }
+
+  session.currentNote = note;
+  session.currentQuestion = question;
+  session.awaitingAnswer = true;
+
+  const progress = formatPairBrainProgress(session);
+  bus.emit("output:append", `${progress}: ${note.subject ?? ""}`);
+  bus.emit("output:append", `Q${session.currentIndex + 1}: ${question}`);
   bus.emit("output:append", "Sua resposta:");
   bus.emit("input:placeholder", "digite sua resposta");
   bus.emit("input:unmask");
   bus.emit("router:capture:start", {
     echo: "normal",
-    handler: (value) => handlePairBrainInput(bus, value, apiKey),
+    handler: (value) => handlePairBrainInput(bus, value, apiKey, client, userId),
     onCancel: () => {
       finishCapture(bus);
       clearPairBrainSession();
@@ -370,7 +427,7 @@ function showPairBrainQuestion(bus, apiKey) {
   });
 }
 
-async function handlePairBrainInput(bus, value, apiKey) {
+async function handlePairBrainInput(bus, value, apiKey, client, userId) {
   const session = getPairBrainSession();
   if (!session.active) {
     bus.emit("router:capture:stop");
@@ -380,27 +437,31 @@ async function handlePairBrainInput(bus, value, apiKey) {
   const input = value.trim();
   const normalized = input.toLowerCase();
 
-  if (normalized === "cancel") {
-    finishCapture(bus);
-    clearPairBrainSession();
-    bus.emit("output:append", "PAIR BRAIN cancelado.");
+  if (normalized === "stop" || normalized === "cancel") {
+    await finishPairBrain(bus, apiKey);
+    return;
+  }
+
+  if (normalized === "status") {
+    bus.emit("output:append", formatPairBrainProgress(session));
     return;
   }
 
   if (normalized === "skip") {
     recordPairBrainTurn({
-      subject: session.notes[session.index]?.subject ?? "",
-      question: session.questions[session.index],
+      subject: session.currentNote?.subject ?? "",
+      question: session.currentQuestion,
       answer: "",
       rebuttal: "",
       skipped: true,
     });
-    if (session.index >= session.notes.length - 1) {
+    session.awaitingAnswer = false;
+    advancePairBrainIndex();
+    if (session.mode === "fixed" && session.currentIndex >= session.targetCount) {
       await finishPairBrain(bus, apiKey);
       return;
     }
-    advancePairBrainIndex();
-    showPairBrainQuestion(bus, apiKey);
+    await showPairBrainQuestion(bus, apiKey, client, userId);
     return;
   }
 
@@ -409,64 +470,45 @@ async function handlePairBrainInput(bus, value, apiKey) {
     return;
   }
 
-  if (session.phase === "rebut") {
-    bus.emit("output:append", "Aguarde a resposta da IA.");
+  if (!session.awaitingAnswer) {
+    bus.emit("output:append", "Aguarde a próxima pergunta.");
     return;
   }
 
-  session.phase = "rebut";
-  session.lastUserAnswer = input;
+  session.awaitingAnswer = false;
 
-  const note = session.notes[session.index];
-  const question = session.questions[session.index];
-  const rebuttalPrompt = buildPairBrainRebuttalPrompt(note, question, input);
-
-  let rebuttal = null;
-  try {
-    rebuttal = await generateText(rebuttalPrompt, apiKey);
-  } catch (error) {
-    const message = error?.message ?? "Erro desconhecido.";
-    bus.emit("output:append", `ERR: ${message}`);
-    bus.emit("output:append", "ERR: IA indisponível, encerrando Pair Brain.");
+  const note = session.currentNote;
+  const question = session.currentQuestion;
+  const rebuttal = await generatePairBrainRebuttal(bus, apiKey, note, question, input);
+  if (!rebuttal) {
     finishCapture(bus);
     clearPairBrainSession();
     return;
   }
 
-  const trimmedRebuttal = truncateOutput(rebuttal);
-  trimmedRebuttal.split("\n").forEach((line) => bus.emit("output:append", line));
+  rebuttal.split("\n").forEach((line) => bus.emit("output:append", line));
   recordPairBrainTurn({
-    subject: note.subject ?? "",
+    subject: note?.subject ?? "",
     question,
     answer: input,
-    rebuttal: trimmedRebuttal,
+    rebuttal,
   });
 
-  if (session.index >= session.notes.length - 1) {
+  advancePairBrainIndex();
+  if (session.mode === "fixed" && session.currentIndex >= session.targetCount) {
     await finishPairBrain(bus, apiKey);
     return;
   }
 
-  advancePairBrainIndex();
-  showPairBrainQuestion(bus, apiKey);
+  await showPairBrainQuestion(bus, apiKey, client, userId);
 }
 
 async function finishPairBrain(bus, apiKey) {
   const session = getPairBrainSession();
-  let closing = null;
-  try {
-    closing = await generateText(buildPairBrainClosingPrompt(session.history), apiKey);
-  } catch (error) {
-    const message = error?.message ?? "Erro desconhecido.";
-    bus.emit("output:append", `ERR: ${message}`);
-    bus.emit("output:append", "ERR: IA indisponível, encerrando Pair Brain.");
-    finishCapture(bus);
-    clearPairBrainSession();
-    return;
+  const closing = await generatePairBrainClosing(bus, apiKey, session.history);
+  if (closing) {
+    closing.split("\n").forEach((line) => bus.emit("output:append", line));
   }
-
-  const trimmedClosing = truncateOutput(closing);
-  trimmedClosing.split("\n").forEach((line) => bus.emit("output:append", line));
   finishCapture(bus);
   clearPairBrainSession();
 }
@@ -536,7 +578,7 @@ export function iaCommand(bus) {
           "- IA test: testa a conexão com o Gemini",
           "- IA off: remove a chave da IA",
           '- IA ask "<pergunta>": consulta geral',
-          "- IA pair brain: modo crítico guiado por 3 notas",
+          "- IA pair brain [N|endless]: modo crítico guiado por notas",
           '- IA insight note id="uuid": gera insights para uma nota',
           "- IA suggest links [LIMIT n]: sugere comandos LINK",
           "- IA summarize today: resume notas das últimas 24h",
@@ -580,7 +622,13 @@ export function iaCommand(bus) {
       return;
     }
 
-    if (normalized === "ia pair brain") {
+    if (normalized.startsWith("ia pair brain")) {
+      const args = parsePairBrainArgs(trimmed);
+      if (args?.error) {
+        bus.emit("output:append", args.error);
+        return;
+      }
+
       if (pairBrainSession.active) {
         bus.emit("output:append", "PAIR BRAIN já está ativo. Responda ou use cancel.");
         return;
@@ -601,47 +649,42 @@ export function iaCommand(bus) {
       const user = await getAuthenticatedUser(bus, client);
       if (!user) return;
 
-      let data = null;
-      let queryError = null;
-      ({ data, error: queryError } = await client
-        .from("notes")
-        .select(NOTE_FIELDS.join(","))
-        .eq("user_id", user.id)
-        .order("created_at", { ascending: false })
-        .order("id", { ascending: false })
-        .limit(PAIR_BRAIN_NOTE_LIMIT));
-
-      if (queryError) {
-        ({ data, error: queryError } = await client
-          .from("notes")
-          .select(NOTE_FIELDS.join(","))
-          .eq("user_id", user.id)
-          .order("id", { ascending: false })
-          .limit(PAIR_BRAIN_NOTE_LIMIT));
-      }
-
-      if (queryError) {
-        bus.emit("output:append", `Erro ao buscar notas: ${queryError.message}`);
+      const validNotes = await fetchPairBrainNotes(bus, client, user.id);
+      if (!validNotes || !validNotes.length) {
+        bus.emit("output:append", "Sem notas com conteúdo suficiente para Pair Brain.");
         return;
       }
 
-      const validNotes = (data ?? []).filter((note) => (note.body ?? "").trim());
-      if (validNotes.length < 3) {
-        bus.emit("output:append", "É preciso ter pelo menos 3 notas com conteúdo.");
-        return;
+      if (args.mode === "fixed") {
+        const available = validNotes.length;
+        let targetCount = args.targetCount ?? PAIR_BRAIN_DEFAULT_COUNT;
+        if (available < targetCount) {
+          bus.emit(
+            "output:append",
+            `Só encontrei ${available} notas com conteúdo; a sessão terá ${available} perguntas.`
+          );
+          targetCount = available;
+        }
+
+        startPairBrainSession({
+          mode: "fixed",
+          targetCount,
+          pool: validNotes.slice(0, targetCount),
+        });
+        bus.emit(
+          "output:append",
+          `PAIR BRAIN iniciado: ${targetCount} perguntas.`
+        );
+      } else {
+        startPairBrainSession({
+          mode: "endless",
+          targetCount: null,
+          pool: validNotes,
+        });
+        bus.emit("output:append", "PAIR BRAIN iniciado: modo endless.");
       }
 
-      const selection = await selectPairBrainNotes(bus, validNotes, apiKey);
-      if (!selection) return;
-
-      const { notes, questions } = selection;
-      startPairBrainSession({ notes, questions });
-
-      bus.emit(
-        "output:append",
-        "PAIR BRAIN iniciado. Vou escolher 3 notas e te desafiar com 3 perguntas."
-      );
-      showPairBrainQuestion(bus, apiKey);
+      await showPairBrainQuestion(bus, apiKey, client, user.id);
       return;
     }
 
@@ -854,7 +897,7 @@ export function iaCommand(bus) {
 
     bus.emit(
       "output:append",
-      'Uso: IA | IA help | IA test | IA off | IA ask "<pergunta>" | IA pair brain | IA insight note id="uuid" | IA suggest links [LIMIT n] | IA summarize today | IA title note id="uuid"'
+      'Uso: IA | IA help | IA test | IA off | IA ask "<pergunta>" | IA pair brain [N|endless] | IA insight note id="uuid" | IA suggest links [LIMIT n] | IA summarize today | IA title note id="uuid"'
     );
   };
 

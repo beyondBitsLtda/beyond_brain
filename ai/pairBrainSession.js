@@ -1,27 +1,33 @@
 const session = {
   active: false,
-  notes: [],
-  questions: [],
-  index: 0,
-  phase: "ask",
-  lastQuestion: "",
-  lastUserAnswer: "",
+  mode: "fixed",
+  targetCount: null,
+  currentIndex: 0,
+  pool: [],
+  usedNoteIds: new Set(),
+  currentNote: null,
+  currentQuestion: "",
+  awaitingAnswer: false,
   history: [],
+  lastNoteId: null,
 };
 
 export function getPairBrainSession() {
   return session;
 }
 
-export function startPairBrainSession({ notes, questions }) {
+export function startPairBrainSession({ mode, targetCount, pool }) {
   session.active = true;
-  session.notes = notes;
-  session.questions = questions;
-  session.index = 0;
-  session.phase = "ask";
-  session.lastQuestion = "";
-  session.lastUserAnswer = "";
+  session.mode = mode;
+  session.targetCount = targetCount ?? null;
+  session.currentIndex = 0;
+  session.pool = Array.isArray(pool) ? pool : [];
+  session.usedNoteIds = new Set();
+  session.currentNote = null;
+  session.currentQuestion = "";
+  session.awaitingAnswer = false;
   session.history = [];
+  session.lastNoteId = null;
 }
 
 export function recordPairBrainTurn(entry) {
@@ -29,16 +35,19 @@ export function recordPairBrainTurn(entry) {
 }
 
 export function advancePairBrainIndex() {
-  session.index += 1;
+  session.currentIndex += 1;
 }
 
 export function clearPairBrainSession() {
   session.active = false;
-  session.notes = [];
-  session.questions = [];
-  session.index = 0;
-  session.phase = "done";
-  session.lastQuestion = "";
-  session.lastUserAnswer = "";
+  session.mode = "fixed";
+  session.targetCount = null;
+  session.currentIndex = 0;
+  session.pool = [];
+  session.usedNoteIds = new Set();
+  session.currentNote = null;
+  session.currentQuestion = "";
+  session.awaitingAnswer = false;
   session.history = [];
+  session.lastNoteId = null;
 }
