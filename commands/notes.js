@@ -1,7 +1,9 @@
 import { getSupabaseClient } from "../supabaseClient.js";
-import { clearSession } from "../sessionStore.js";
-
-const MAX_BODY_LENGTH = 300;
+import {
+  MAX_BODY_LENGTH,
+  getAuthenticatedUser,
+  insertNote,
+} from "../notesService.js";
 const NOTE_FIELDS = ["id", "subject", "moment", "body", "ref", "created_at"];
 const UPDATE_FIELDS = ["subject", "moment", "body", "ref"];
 const TABLE_MAX_WIDTH = 40;
@@ -125,16 +127,6 @@ function formatTableSQLServer(rows, fields, maxWidth = TABLE_MAX_WIDTH) {
   return [border, header, border, ...dataRows, border];
 }
 
-async function getAuthenticatedUser(bus, client) {
-  const { data, error } = await client.auth.getUser();
-  if (error || !data?.user) {
-    clearSession();
-    bus.emit("output:append", "Você precisa estar logado para usar este comando.");
-    return null;
-  }
-  return data.user;
-}
-
 function validateBodyLength(bus, body) {
   if (body.length > MAX_BODY_LENGTH) {
     bus.emit(
@@ -228,19 +220,14 @@ export function insertNoteCommand(bus) {
 
     if (!validateBodyLength(bus, body)) return;
 
-    const payload = {
+    const { data, error: insertError } = await insertNote({
+      client,
+      userId: user.id,
       subject,
       moment,
       body,
-      ref: ref || null,
-      user_id: user.id,
-    };
-
-    const { data, error: insertError } = await client
-      .from("notes")
-      .insert(payload)
-      .select("id")
-      .maybeSingle();
+      ref,
+    });
 
     if (insertError) {
       bus.emit("output:append", `Erro ao inserir nota: ${insertError.message}`);
