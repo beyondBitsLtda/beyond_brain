@@ -42,6 +42,12 @@ function finishCapture(bus) {
   bus.emit("input:placeholder", "");
 }
 
+function exitEditorIfProgramming(bus, session) {
+  if (session.mode === "programming") {
+    bus.emit("editor:close");
+  }
+}
+
 function parseKeyValuePairs(raw) {
   const pairs = {};
   const regex = /(\w+)="([^"]*)"/g;
@@ -297,6 +303,7 @@ async function handleAnswerCapture(bus, value, client, userId, apiKey) {
   const session = getBrainTrainSession();
   if (!session.active || !session.awaitingAnswer) {
     finishCapture(bus);
+    exitEditorIfProgramming(bus, session);
     return;
   }
 
@@ -305,6 +312,7 @@ async function handleAnswerCapture(bus, value, client, userId, apiKey) {
 
   if (normalized === "cancel" || normalized === "stop") {
     finishCapture(bus);
+    exitEditorIfProgramming(bus, session);
     clearBrainTrainSession();
     bus.emit("output:append", "Brain Train cancelado.");
     return;
@@ -316,6 +324,7 @@ async function handleAnswerCapture(bus, value, client, userId, apiKey) {
   }
 
   finishCapture(bus);
+  exitEditorIfProgramming(bus, session);
   setBrainTrainAnswer(input);
 
   let evaluation = null;
@@ -413,14 +422,26 @@ async function startBrainTrain(
   bus.emit("input:placeholder", "digite sua resposta");
   bus.emit("input:unmask");
   bus.emit("router:capture:start", {
-    echo: "normal",
+    echo: mode === "programming" ? "none" : "normal",
     handler: (value) => handleAnswerCapture(bus, value, client, userId, apiKey),
     onCancel: () => {
       finishCapture(bus);
+      if (mode === "programming") {
+        bus.emit("editor:close");
+      }
       clearBrainTrainSession();
       bus.emit("output:append", "Brain Train cancelado.");
     },
   });
+
+  if (mode === "programming") {
+    bus.emit("editor:open", {
+      language,
+      tabSize: 2,
+      onSubmit: (code) => bus.emit("command:submit", { raw: code }),
+      onCancel: () => bus.emit("input:escape"),
+    });
+  }
 }
 
 async function showScore(bus, client, userId, scope) {

@@ -23,6 +23,7 @@ const HELP_TEXT = `Comandos disponíveis:
 - pet: entra no modo pet (pet name "NOME" | pet reset)
 - IA: comandos de inteligência artificial (IA help)
 - BRAIN TRAIN: treino cognitivo diário (BRAIN TRAIN help)
+- editor on|off: ativa/desativa o editor de programação
 - mic: dita uma nota rápida por voz (salva como Quick Thought)`;
 
 export function helpCommand(bus) {

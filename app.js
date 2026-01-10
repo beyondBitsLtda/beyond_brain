@@ -31,6 +31,7 @@ import { xpCommand } from "./commands/xp.js";
 import { iaCommand } from "./commands/ia.js";
 import { createMicController } from "./voice/micController.js";
 import { brainTrainCommand } from "./commands/brainTrain.js";
+import { editorCommand } from "./commands/editor.js";
 
 const bus = createEventBus();
 const focusManager = createFocusManager(bus);
@@ -82,6 +83,7 @@ const commands = {
   ia: iaCommand(bus),
   BRAIN: brainTrainCommand(bus),
   brain: brainTrainCommand(bus),
+  editor: editorCommand(bus),
   mic: () => micController.open(),
 };
 
