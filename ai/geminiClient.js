@@ -1,6 +1,8 @@
 import { GEMINI_API_VERSION, GEMINI_MODEL } from "./geminiConfig.js";
 
 const GEMINI_ENDPOINT = `https://generativelanguage.googleapis.com/${GEMINI_API_VERSION}/models/${GEMINI_MODEL}:generateContent`;
+const BRAIN_TRAIN_SYSTEM_PREFIX =
+  "Você deve responder SOMENTE em Português do Brasil (pt-BR). Não use inglês. Seja direto e curto.";
 
 function buildRequestBody(prompt) {
   return {
@@ -72,3 +74,16 @@ export async function requestGeminiText({ prompt, apiKey }) {
 export async function generateText(prompt, apiKey) {
   return requestGeminiText({ prompt, apiKey });
 }
+
+function applySystemPrefix(prompt, systemPrefix) {
+  const trimmed = prompt?.trim?.() ?? "";
+  if (!systemPrefix) return trimmed;
+  return `${systemPrefix}\n\n${trimmed}`.trim();
+}
+
+export async function generateBrainTrainText(prompt, apiKey) {
+  const finalPrompt = applySystemPrefix(prompt, BRAIN_TRAIN_SYSTEM_PREFIX);
+  return requestGeminiText({ prompt: finalPrompt, apiKey });
+}
+
+export { BRAIN_TRAIN_SYSTEM_PREFIX };

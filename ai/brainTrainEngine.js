@@ -1,33 +1,49 @@
-import { generateText } from "./geminiClient.js";
+import { generateBrainTrainText } from "./geminiClient.js";
 
 const MODE_LABELS = {
   logic: "raciocínio lógico",
   math: "matemática mental",
   puzzle: "quebra-cabeças conceituais",
-  programming: "lógica e pensamento computacional",
+  programming: "programação (lógica e pensamento computacional)",
   daily: "modo misto",
 };
 
-function buildChallengePrompt(mode, difficulty) {
+function buildChallengePrompt(mode, difficulty, language, category) {
   const description = MODE_LABELS[mode] ?? MODE_LABELS.daily;
+  const languageLine = language ? `Linguagem: ${language}.` : null;
+  const categoryLine = category ? `Categoria: ${category}.` : null;
   return [
     "Você é um treinador cognitivo diário.",
     "Gere UM único desafio claro e curto.",
-    `Modo: ${mode} (${description}).`,
+    `Modo: ${description}.`,
     `Dificuldade: ${difficulty}.`,
-    "Não inclua a resposta e não use múltiplas perguntas.",
+    languageLine,
+    categoryLine,
+    mode === "programming"
+      ? "Crie um desafio de programação em pt-BR."
+      : "Crie um desafio em pt-BR.",
+    "Não inclua a resposta no desafio.",
+    "Evite enunciados muito longos.",
     "Responda apenas com o texto do desafio.",
-  ].join("\n");
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
-function buildEvaluationPrompt(prompt, userAnswer) {
+function buildEvaluationPrompt(prompt, userAnswer, language, category) {
+  const languageLine = language ? `Linguagem: ${language}.` : null;
+  const categoryLine = category ? `Categoria: ${category}.` : null;
   return [
     "Você é um avaliador de desafios cognitivos.",
+    "Avalie em pt-BR.",
     "Avalie a resposta do usuário e retorne JSON estrito no formato:",
     "{\n  \"is_correct\": true,\n  \"expected_answer\": \"...\",\n  \"feedback\": \"...\"\n}",
     "Feedback curto e direto.",
     "Se não houver resposta esperada específica, use expected_answer como string vazia.",
     "Não inclua nenhum texto fora do JSON.",
+    "",
+    languageLine,
+    categoryLine,
     "",
     "Desafio:",
     prompt,
@@ -70,9 +86,9 @@ function normalizeEvaluation(payload) {
   };
 }
 
-export async function generateChallenge(mode, difficulty, apiKey) {
-  const prompt = buildChallengePrompt(mode, difficulty);
-  const response = await generateText(prompt, apiKey);
+export async function generateChallenge(mode, difficulty, apiKey, { language, category } = {}) {
+  const prompt = buildChallengePrompt(mode, difficulty, language, category);
+  const response = await generateBrainTrainText(prompt, apiKey);
   const challenge = response.trim();
   if (!challenge) {
     throw new Error("Resposta vazia da IA.");
@@ -80,9 +96,9 @@ export async function generateChallenge(mode, difficulty, apiKey) {
   return challenge;
 }
 
-export async function evaluateAnswer(prompt, userAnswer, apiKey) {
-  const evaluationPrompt = buildEvaluationPrompt(prompt, userAnswer);
-  const response = await generateText(evaluationPrompt, apiKey);
+export async function evaluateAnswer(prompt, userAnswer, apiKey, { language, category } = {}) {
+  const evaluationPrompt = buildEvaluationPrompt(prompt, userAnswer, language, category);
+  const response = await generateBrainTrainText(evaluationPrompt, apiKey);
   const jsonPayload = extractJsonPayload(response);
   if (!jsonPayload) {
     throw new Error("JSON inválido.");

@@ -9,9 +9,13 @@ import { generateChallenge, evaluateAnswer } from "../ai/brainTrainEngine.js";
 import {
   clearBrainTrainSession,
   getBrainTrainSession,
+  setBrainTrainCategory,
   setBrainTrainAnswer,
   setBrainTrainAttemptId,
   setBrainTrainFeedback,
+  setBrainTrainContext,
+  setBrainTrainLanguage,
+  startProgrammingSetup,
   startBrainTrainSession,
 } from "../brainTrain/brainTrainSession.js";
 
@@ -114,8 +118,7 @@ function trimBody(body) {
   return { body: `${trimmed}...`, trimmed: true };
 }
 
-async function saveBrainTrainAttempt({
-  client,
+function buildAttemptPayload({
   userId,
   mode,
   difficulty,
@@ -125,6 +128,8 @@ async function saveBrainTrainAttempt({
   points,
   aiFeedback,
   aiExpected,
+  language,
+  category,
 }) {
   const payload = {
     user_id: userId,
@@ -139,11 +144,72 @@ async function saveBrainTrainAttempt({
     ai_expected: aiExpected || null,
   };
 
-  const { data, error } = await client
-    .from("brain_train_attempts")
-    .insert(payload)
-    .select("id")
-    .maybeSingle();
+  if (language) {
+    payload.language = language;
+  }
+
+  if (category) {
+    payload.category = category;
+  }
+
+  return payload;
+}
+
+async function saveBrainTrainAttempt({
+  client,
+  userId,
+  mode,
+  difficulty,
+  prompt,
+  userAnswer,
+  isCorrect,
+  points,
+  aiFeedback,
+  aiExpected,
+  language,
+  category,
+}) {
+  const payload = buildAttemptPayload({
+    userId,
+    mode,
+    difficulty,
+    prompt,
+    userAnswer,
+    isCorrect,
+    points,
+    aiFeedback,
+    aiExpected,
+    language,
+    category,
+  });
+
+  const attemptInsert = async (insertPayload) =>
+    client
+      .from("brain_train_attempts")
+      .insert(insertPayload)
+      .select("id")
+      .maybeSingle();
+
+  let { data, error } = await attemptInsert(payload);
+  if (error && (payload.language || payload.category)) {
+    const message = String(error.message ?? "").toLowerCase();
+    const missingColumn =
+      message.includes("column") && (message.includes("language") || message.includes("category"));
+    if (missingColumn) {
+      const fallbackPayload = buildAttemptPayload({
+        userId,
+        mode,
+        difficulty,
+        prompt,
+        userAnswer,
+        isCorrect,
+        points,
+        aiFeedback,
+        aiExpected,
+      });
+      ({ data, error } = await attemptInsert(fallbackPayload));
+    }
+  }
 
   if (error) {
     return { attemptId: null, error };
@@ -254,7 +320,10 @@ async function handleAnswerCapture(bus, value, client, userId, apiKey) {
 
   let evaluation = null;
   try {
-    evaluation = await evaluateAnswer(session.prompt, input, apiKey);
+    evaluation = await evaluateAnswer(session.prompt, input, apiKey, {
+      language: session.language,
+      category: session.category,
+    });
   } catch (error) {
     console.error("Erro ao avaliar Brain Train:", error);
     bus.emit("output:append", "Erro ao avaliar resposta. Tente novamente mais tarde.");
@@ -288,6 +357,8 @@ async function handleAnswerCapture(bus, value, client, userId, apiKey) {
     points,
     aiFeedback: evaluation.feedback,
     aiExpected: expected,
+    language: session.language,
+    category: session.category,
   });
 
   if (error || !attemptId) {
@@ -314,10 +385,16 @@ async function handleAnswerCapture(bus, value, client, userId, apiKey) {
   });
 }
 
-async function startBrainTrain(bus, client, userId, apiKey, { mode, difficulty }) {
+async function startBrainTrain(
+  bus,
+  client,
+  userId,
+  apiKey,
+  { mode, difficulty, language, category }
+) {
   let challenge = "";
   try {
-    challenge = await generateChallenge(mode, difficulty, apiKey);
+    challenge = await generateChallenge(mode, difficulty, apiKey, { language, category });
   } catch (error) {
     console.error("Erro ao gerar Brain Train:", error);
     bus.emit("output:append", "Erro ao gerar desafio. Tente novamente mais tarde.");
@@ -325,6 +402,7 @@ async function startBrainTrain(bus, client, userId, apiKey, { mode, difficulty }
   }
 
   startBrainTrainSession({ mode, difficulty, prompt: challenge });
+  setBrainTrainContext({ language, category });
 
   bus.emit("output:append", formatHeader(mode, difficulty));
   bus.emit("output:append", "");
@@ -452,6 +530,85 @@ function parseBrainTrainCommand(raw) {
   };
 }
 
+function isCancelInput(value) {
+  const normalized = value.trim().toLowerCase();
+  return normalized === "cancel" || normalized === "stop";
+}
+
+async function handleProgrammingCategoryCapture(
+  bus,
+  value,
+  client,
+  userId,
+  apiKey
+) {
+  const session = getBrainTrainSession();
+  if (!session.active || !session.awaitingCategory) {
+    finishCapture(bus);
+    return;
+  }
+
+  if (isCancelInput(value)) {
+    finishCapture(bus);
+    clearBrainTrainSession();
+    bus.emit("output:append", "Brain Train cancelado.");
+    return;
+  }
+
+  const input = value.trim();
+  const category = input ? input : "geral";
+  setBrainTrainCategory(category);
+  finishCapture(bus);
+
+  await startBrainTrain(bus, client, userId, apiKey, {
+    mode: "programming",
+    difficulty: session.difficulty,
+    language: session.language,
+    category,
+  });
+}
+
+function handleProgrammingLanguageCapture(bus, value, client, userId, apiKey) {
+  const session = getBrainTrainSession();
+  if (!session.active || !session.awaitingLanguage) {
+    finishCapture(bus);
+    return;
+  }
+
+  if (isCancelInput(value)) {
+    finishCapture(bus);
+    clearBrainTrainSession();
+    bus.emit("output:append", "Brain Train cancelado.");
+    return;
+  }
+
+  const input = value.trim();
+  if (!input) {
+    bus.emit("output:append", "Linguagem vazia. Informe uma linguagem ou use cancel.");
+    return;
+  }
+
+  setBrainTrainLanguage(input);
+  finishCapture(bus);
+
+  bus.emit(
+    "output:append",
+    "Quer focar em alguma categoria? (ex: algoritmos, estruturas de dados, bugs, SQL, front-end, back-end, testes, arquitetura)."
+  );
+  bus.emit("output:append", "Se não, digite ENTER ou 'geral'.");
+  bus.emit("input:placeholder", "categoria ou geral");
+  bus.emit("router:capture:start", {
+    echo: "normal",
+    handler: (categoryValue) =>
+      handleProgrammingCategoryCapture(bus, categoryValue, client, userId, apiKey),
+    onCancel: () => {
+      finishCapture(bus);
+      clearBrainTrainSession();
+      bus.emit("output:append", "Brain Train cancelado.");
+    },
+  });
+}
+
 export function brainTrainCommand(bus) {
   return async ({ raw = "" } = {}) => {
     const session = getBrainTrainSession();
@@ -502,6 +659,26 @@ export function brainTrainCommand(bus) {
 
     const apiKey = ensureGeminiKey(bus);
     if (!apiKey) return;
+
+    if (parsed.mode === "programming") {
+      startProgrammingSetup({ mode: parsed.mode, difficulty: parsed.difficulty });
+      bus.emit(
+        "output:append",
+        "Qual linguagem? (ex: JavaScript, Python, Java, C#, etc.)"
+      );
+      bus.emit("input:placeholder", "linguagem");
+      bus.emit("router:capture:start", {
+        echo: "normal",
+        handler: (languageValue) =>
+          handleProgrammingLanguageCapture(bus, languageValue, client, user.id, apiKey),
+        onCancel: () => {
+          finishCapture(bus);
+          clearBrainTrainSession();
+          bus.emit("output:append", "Brain Train cancelado.");
+        },
+      });
+      return;
+    }
 
     await startBrainTrain(bus, client, user.id, apiKey, {
       mode: parsed.mode,
