@@ -11,6 +11,7 @@ const HELP_TEXT = `Comandos disponíveis:
 - SELECT NOTE [FIELDS(...)] [WHERE ...] [LIMIT n]: lista notas
 - UPDATE NOTE id="..." SET field="...": atualiza nota
 - DELETE NOTE id="...": remove nota
+- open #N | open id="uuid": abre nota completa do último SELECT
 - LINK from="uuid|subject" to="uuid|subject" type="...": cria uma relação entre notas
 - UNLINK from="uuid" to="uuid": remove relação entre notas
 - rels: lista todas as relações do usuário

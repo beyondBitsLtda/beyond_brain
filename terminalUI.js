@@ -21,10 +21,27 @@ export function createTerminalUI(bus) {
   let editorActive = false;
   const codeEditor = createCodeEditor();
 
-  function appendLine(text) {
+  function appendLine(payload) {
     const line = document.createElement("div");
     line.className = "terminal__line";
-    line.textContent = text;
+    if (typeof payload === "string") {
+      line.textContent = payload;
+    } else if (payload && typeof payload === "object") {
+      line.textContent = payload.text ?? "";
+      if (payload.className) {
+        line.classList.add(payload.className);
+      }
+      if (payload.data && typeof payload.data === "object") {
+        Object.entries(payload.data).forEach(([key, value]) => {
+          if (value !== undefined) {
+            line.dataset[key] = String(value);
+          }
+        });
+      }
+      if (typeof payload.onClick === "function") {
+        line.addEventListener("click", payload.onClick);
+      }
+    }
     output.appendChild(line);
     output.scrollTop = output.scrollHeight;
   }

@@ -393,6 +393,14 @@ body::after {
   line-height: var(--line-height);
 }
 
+.terminal__line--clickable {
+  cursor: pointer;
+}
+
+.terminal__line--clickable:hover {
+  color: var(--accent);
+}
+
 .terminal__input-row {
   position: relative;
   display: flex;
@@ -563,6 +571,72 @@ body::after {
 
 .token.function {
   color: var(--accent);
+}
+
+.note-viewer {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  z-index: 10;
+}
+
+.note-viewer[hidden] {
+  display: none;
+}
+
+.note-viewer__backdrop {
+  position: absolute;
+  inset: 0;
+  background: var(--overlay);
+}
+
+.note-viewer__panel {
+  position: relative;
+  width: min(800px, 92vw);
+  max-height: 85vh;
+  padding: 1.5rem;
+  border: var(--border-width) solid var(--border-soft);
+  background: var(--panel-bg, var(--bg));
+  color: var(--fg);
+  box-shadow: 0 0 16px var(--glow);
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  z-index: 1;
+}
+
+.note-viewer__close {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.75rem;
+  border: var(--border-width) solid var(--border-soft);
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  padding: 0.1rem 0.5rem;
+  cursor: pointer;
+}
+
+.note-viewer__subject {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.note-viewer__meta {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.note-viewer__body {
+  margin: 0;
+  padding: 0.75rem;
+  border: var(--border-width) solid var(--border-soft);
+  background: var(--screen-bg);
+  overflow: auto;
+  white-space: pre-wrap;
+  line-height: var(--line-height);
+  flex: 1;
 }
 
 @keyframes blink {

@@ -1,7 +1,7 @@
 import { getSupabaseClient } from "../supabaseClient.js";
 import {
-  MAX_BODY_LENGTH,
   getAuthenticatedUser,
+  getBodyColumnMigrationHint,
   insertNote,
 } from "../notesService.js";
 import { getGeminiKey } from "../ai/aiConfig.js";
@@ -135,14 +135,6 @@ function buildNoteBody({ prompt, answer, feedback, expected }) {
   return lines.join("\n");
 }
 
-function trimBody(body) {
-  if (body.length <= MAX_BODY_LENGTH) return { body, trimmed: false };
-  if (MAX_BODY_LENGTH <= 3) {
-    return { body: body.slice(0, MAX_BODY_LENGTH), trimmed: true };
-  }
-  const trimmed = body.slice(0, MAX_BODY_LENGTH - 3);
-  return { body: `${trimmed}...`, trimmed: true };
-}
 
 function buildAttemptPayload({
   userId,
@@ -305,26 +297,21 @@ async function handleNoteSave(bus, value, client, userId) {
     feedback: session.aiFeedback,
     expected: session.aiExpected,
   });
-  const { body, trimmed } = trimBody(bodyRaw);
-
   const { data, error } = await insertNote({
     client,
     userId,
     subject,
     moment,
-    body,
+    body: bodyRaw,
   });
 
   if (error || !data?.id) {
     bus.emit("output:append", "Erro ao salvar nota do Brain Train.");
-  } else {
-    if (trimmed) {
-      bus.emit(
-        "output:append",
-        `Nota salva com body reduzido para ${MAX_BODY_LENGTH} caracteres.`
-      );
+    const hint = getBodyColumnMigrationHint(error);
+    if (hint) {
+      bus.emit("output:append", hint);
     }
-
+  } else {
     const { error: updateError } = await updateAttemptNote({
       client,
       userId,

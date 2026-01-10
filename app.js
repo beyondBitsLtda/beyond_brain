@@ -32,12 +32,15 @@ import { iaCommand } from "./commands/ia.js";
 import { createMicController } from "./voice/micController.js";
 import { brainTrainCommand } from "./commands/brainTrain.js";
 import { editorCommand } from "./commands/editor.js";
+import { openCommand } from "./commands/open.js";
+import { createNoteViewer } from "./ui/noteViewer.js";
 
 const bus = createEventBus();
 const focusManager = createFocusManager(bus);
 const initialTheme = loadTheme();
 const petManager = createPetManager(bus);
 const micController = createMicController(bus);
+const noteViewer = createNoteViewer();
 
 const ui = createTerminalUI(bus);
 ui.showIntro();
@@ -84,10 +87,13 @@ const commands = {
   BRAIN: brainTrainCommand(bus),
   brain: brainTrainCommand(bus),
   editor: editorCommand(bus),
+  open: openCommand(bus),
   mic: () => micController.open(),
 };
 
 createCommandRouter(bus, commands);
 bus.emit("theme:change", { key: initialTheme });
+bus.on("noteViewer:open", (note) => noteViewer.open(note));
+bus.on("noteViewer:close", () => noteViewer.close());
 
 bootstrapSession(bus);

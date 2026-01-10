@@ -1,8 +1,7 @@
 import { getSupabaseClient } from "./supabaseClient.js";
 import { clearSession } from "./sessionStore.js";
 import { getCurrentTheme } from "./themeManager.js";
-
-const MAX_BODY_LENGTH = 300;
+import { getBodyColumnMigrationHint } from "./notesService.js";
 const PET_NAME_KEY = "bb_pet_name";
 const PET_TOTAL_FEEDS_KEY = "bb_pet_stats_totalFeeds";
 const DEFAULT_PET_NAME = "Pet";
@@ -251,14 +250,6 @@ export function createPetManager(bus) {
       bus.emit("output:append", "Digite algo para alimentar o pet.");
       return;
     }
-    if (trimmed.length > MAX_BODY_LENGTH) {
-      bus.emit(
-        "output:append",
-        `Body excede ${MAX_BODY_LENGTH} caracteres. Reduza e tente novamente.`
-      );
-      return;
-    }
-
     const { client, error } = getSupabaseClient();
     if (error || !client) {
       bus.emit("output:append", "Supabase não configurado. Use auth --register ou auth para autenticar.");
@@ -283,6 +274,10 @@ export function createPetManager(bus) {
 
     if (insertError) {
       bus.emit("output:append", `Erro ao inserir nota: ${insertError.message}`);
+      const hint = getBodyColumnMigrationHint(insertError);
+      if (hint) {
+        bus.emit("output:append", hint);
+      }
       return;
     }
 

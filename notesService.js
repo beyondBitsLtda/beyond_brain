@@ -1,7 +1,5 @@
 import { clearSession } from "./sessionStore.js";
 
-export const MAX_BODY_LENGTH = 300;
-
 export async function getAuthenticatedUser(
   bus,
   client,
@@ -38,4 +36,15 @@ export async function insertNote({ client, userId, subject, moment, body, ref })
     .maybeSingle();
 
   return { data, error };
+}
+
+export function getBodyColumnMigrationHint(error) {
+  const message = String(error?.message ?? "").toLowerCase();
+  if (!message.includes("character varying") && !message.includes("value too long")) {
+    return "";
+  }
+  if (!message.includes("body")) {
+    return "";
+  }
+  return "A coluna body parece estar limitada. Rode: alter table public.notes alter column body type text;";
 }
