@@ -1,7 +1,6 @@
 import { getSupabaseClient } from "../supabaseClient.js";
 import { clearSession } from "../sessionStore.js";
-
-const MAX_BODY_LENGTH = 300;
+import { getBodyColumnMigrationHint } from "../notesService.js";
 const DEFAULT_SUBJECT = "Quick Thought";
 
 function parseKeyValuePairs(raw) {
@@ -37,17 +36,6 @@ async function getAuthenticatedUser(bus, client) {
   return data.user;
 }
 
-function validateBodyLength(bus, body) {
-  if (body.length > MAX_BODY_LENGTH) {
-    bus.emit(
-      "output:append",
-      `Body excede ${MAX_BODY_LENGTH} caracteres. Reduza e tente novamente.`
-    );
-    return false;
-  }
-  return true;
-}
-
 export function nowCommand(bus) {
   return async ({ raw = "" } = {}) => {
     const trimmed = raw.trim();
@@ -75,8 +63,6 @@ export function nowCommand(bus) {
       return;
     }
 
-    if (!validateBodyLength(bus, body)) return;
-
     const payload = {
       subject,
       moment: formatMoment(),
@@ -92,6 +78,10 @@ export function nowCommand(bus) {
 
     if (insertError) {
       bus.emit("output:append", `Erro ao inserir nota: ${insertError.message}`);
+      const hint = getBodyColumnMigrationHint(insertError);
+      if (hint) {
+        bus.emit("output:append", hint);
+      }
       return;
     }
 

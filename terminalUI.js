@@ -1,3 +1,5 @@
+import { createCodeEditor } from "./ui/codeEditor.js";
+
 const WELCOME_LINES = [
   "Bem-vindo ao terminal Beyond Brain.",
   'Digite "help" para ver os comandos disponíveis.',
@@ -10,16 +12,36 @@ export function createTerminalUI(bus) {
   const input = document.getElementById("command-input");
   const typedText = document.getElementById("typedText");
   const cursor = document.querySelector(".terminal__cursor");
+  const editorPanel = document.getElementById("editor-panel");
   const history = [];
   let historyIndex = null;
   let draftValue = "";
   let isMasked = false;
   let rafId = null;
+  let editorActive = false;
+  const codeEditor = createCodeEditor();
 
-  function appendLine(text) {
+  function appendLine(payload) {
     const line = document.createElement("div");
     line.className = "terminal__line";
-    line.textContent = text;
+    if (typeof payload === "string") {
+      line.textContent = payload;
+    } else if (payload && typeof payload === "object") {
+      line.textContent = payload.text ?? "";
+      if (payload.className) {
+        line.classList.add(payload.className);
+      }
+      if (payload.data && typeof payload.data === "object") {
+        Object.entries(payload.data).forEach(([key, value]) => {
+          if (value !== undefined) {
+            line.dataset[key] = String(value);
+          }
+        });
+      }
+      if (typeof payload.onClick === "function") {
+        line.addEventListener("click", payload.onClick);
+      }
+    }
     output.appendChild(line);
     output.scrollTop = output.scrollHeight;
   }
@@ -125,6 +147,10 @@ export function createTerminalUI(bus) {
   }
 
   function focusInput() {
+    if (editorActive) {
+      codeEditor.focus();
+      return;
+    }
     input.focus();
     scheduleCursorUpdate();
   }
@@ -256,6 +282,46 @@ export function createTerminalUI(bus) {
     });
   }
 
+  function openEditor(options = {}) {
+    const { language, tabSize, value, onSubmit, onCancel } = options;
+    if (!editorPanel || !terminal || !form) {
+      return;
+    }
+    editorActive = true;
+    terminal.classList.add("terminal--editor-mode");
+    editorPanel.hidden = false;
+    form.hidden = true;
+    form.setAttribute("aria-hidden", "true");
+    codeEditor.mount(editorPanel, { language, tabSize });
+    codeEditor.onSubmit((text) => {
+      if (onSubmit) {
+        onSubmit(text);
+      }
+      closeEditor();
+    });
+    codeEditor.onCancel(() => {
+      if (onCancel) {
+        onCancel();
+      }
+      closeEditor();
+    });
+    codeEditor.setValue(value ?? "");
+    codeEditor.updateHighlight(language);
+    codeEditor.focus();
+  }
+
+  function closeEditor() {
+    if (!editorPanel || !terminal || !form) {
+      return;
+    }
+    editorActive = false;
+    terminal.classList.remove("terminal--editor-mode");
+    editorPanel.hidden = true;
+    form.hidden = false;
+    form.removeAttribute("aria-hidden");
+    focusInput();
+  }
+
   bus.on("output:append", (text) => appendLine(text));
   bus.on("output:clear", () => clearOutput());
   bus.on("input:mask", () => {
@@ -270,6 +336,8 @@ export function createTerminalUI(bus) {
     input.placeholder = text ?? "";
   });
   bus.on("input:focus", () => focusInput());
+  bus.on("editor:open", (options) => openEditor(options));
+  bus.on("editor:close", () => closeEditor());
 
   bindInput();
   updateMirror();

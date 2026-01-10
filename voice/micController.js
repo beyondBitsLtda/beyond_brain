@@ -1,5 +1,5 @@
 import { getSupabaseClient } from "../supabaseClient.js";
-import { MAX_BODY_LENGTH, insertNote } from "../notesService.js";
+import { getBodyColumnMigrationHint, insertNote } from "../notesService.js";
 import { createMicOverlay } from "../ui/micOverlay.js";
 
 const STATUS = {
@@ -174,25 +174,21 @@ export function createMicController(bus) {
       return;
     }
 
-    let body = transcript;
-    if (body.length > MAX_BODY_LENGTH) {
-      body = body.slice(0, MAX_BODY_LENGTH);
-      showMessage(
-        `Transcrição maior que ${MAX_BODY_LENGTH} caracteres. Salvando apenas os primeiros ${MAX_BODY_LENGTH}.`
-      );
-    }
-
     const { error: insertError } = await insertNote({
       client,
       userId: data.user.id,
       subject: "Quick Thought",
       moment: "Voice",
-      body,
+      body: transcript,
       ref: "voice",
     });
 
     if (insertError) {
       showMessage(`Erro ao inserir nota: ${insertError.message}`);
+      const hint = getBodyColumnMigrationHint(insertError);
+      if (hint) {
+        showMessage(hint);
+      }
       return;
     }
 

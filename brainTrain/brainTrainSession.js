@@ -1,9 +1,8 @@
 const initialState = {
   active: false,
-  awaitingAnswer: false,
-  awaitingNote: false,
   awaitingLanguage: false,
   awaitingCategory: false,
+  state: "idle",
   mode: "daily",
   difficulty: "normal",
   language: "",
@@ -13,6 +12,9 @@ const initialState = {
   aiFeedback: "",
   aiExpected: "",
   attemptId: null,
+  totalQuestions: 0,
+  totalCorrect: 0,
+  totalPoints: 0,
 };
 
 let session = { ...initialState };
@@ -25,10 +27,11 @@ export function startBrainTrainSession({ mode, difficulty, prompt }) {
   session = {
     ...initialState,
     active: true,
-    awaitingAnswer: true,
+    state: "await_answer",
     mode,
     difficulty,
     prompt,
+    totalQuestions: 1,
   };
   return session;
 }
@@ -38,6 +41,7 @@ export function startProgrammingSetup({ mode, difficulty }) {
     ...initialState,
     active: true,
     awaitingLanguage: true,
+    state: "await_language",
     mode,
     difficulty,
   };
@@ -50,6 +54,7 @@ export function setBrainTrainLanguage(language) {
     language,
     awaitingLanguage: false,
     awaitingCategory: true,
+    state: "await_category",
   };
   return session;
 }
@@ -76,7 +81,6 @@ export function setBrainTrainAnswer(answer) {
   session = {
     ...session,
     userAnswer: answer,
-    awaitingAnswer: false,
   };
   return session;
 }
@@ -85,7 +89,6 @@ export function setBrainTrainAttemptId(attemptId) {
   session = {
     ...session,
     attemptId,
-    awaitingNote: true,
   };
   return session;
 }
@@ -95,6 +98,37 @@ export function setBrainTrainFeedback({ feedback, expected }) {
     ...session,
     aiFeedback: feedback ?? "",
     aiExpected: expected ?? "",
+  };
+  return session;
+}
+
+export function setBrainTrainState(state) {
+  session = {
+    ...session,
+    state,
+  };
+  return session;
+}
+
+export function recordBrainTrainResult({ isCorrect, points }) {
+  session = {
+    ...session,
+    totalCorrect: session.totalCorrect + (isCorrect ? 1 : 0),
+    totalPoints: session.totalPoints + (points ?? 0),
+  };
+  return session;
+}
+
+export function startNextBrainTrainRound({ prompt }) {
+  session = {
+    ...session,
+    prompt,
+    userAnswer: "",
+    aiFeedback: "",
+    aiExpected: "",
+    attemptId: null,
+    state: "await_answer",
+    totalQuestions: session.totalQuestions + 1,
   };
   return session;
 }

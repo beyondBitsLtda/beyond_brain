@@ -1,12 +1,15 @@
 import { getSupabaseClient } from "../supabaseClient.js";
 import {
-  MAX_BODY_LENGTH,
   getAuthenticatedUser,
+  getBodyColumnMigrationHint,
   insertNote,
 } from "../notesService.js";
+import { clear, getByIndex, setList } from "../state/selectionRegistry.js";
 const NOTE_FIELDS = ["id", "subject", "moment", "body", "ref", "created_at"];
 const UPDATE_FIELDS = ["subject", "moment", "body", "ref"];
 const TABLE_MAX_WIDTH = 40;
+const BODY_SUMMARY_LIMIT = 140;
+const ID_PREFIX_LENGTH = 8;
 
 function parseKeyValuePairs(raw) {
   const pairs = {};
@@ -99,43 +102,58 @@ function normalizeCellValue(value, field) {
 function truncateCell(value, width) {
   if (value.length <= width) return value;
   if (width <= 3) return value.slice(0, width);
-  return `${value.slice(0, width - 3)}...`;
+  return `${value.slice(0, width - 1)}…`;
 }
 
-function formatTableSQLServer(rows, fields, maxWidth = TABLE_MAX_WIDTH) {
+function normalizeSummary(value, limit = BODY_SUMMARY_LIMIT) {
+  if (!value) return "";
+  const collapsed = String(value).replace(/\s+/g, " ").trim();
+  if (collapsed.length <= limit) return collapsed;
+  return `${collapsed.slice(0, limit - 1)}…`;
+}
+
+function formatNoteTable(notes) {
+  const fields = ["idx", "id", "subject", "moment", "created_at", "body"];
+  const rows = notes.map((note, index) => ({
+    idx: `#${index + 1}`,
+    id: String(note.id ?? "").slice(0, ID_PREFIX_LENGTH),
+    subject: note.subject ?? "",
+    moment: note.moment ?? "",
+    created_at: formatDateTime(note.created_at ?? ""),
+    body: normalizeSummary(note.body ?? ""),
+  }));
+
   const widths = fields.map((field) => field.length);
   rows.forEach((row) => {
     fields.forEach((field, index) => {
-      const value = normalizeCellValue(row[field], field);
-      widths[index] = Math.max(widths[index], value.length);
+      widths[index] = Math.max(widths[index], String(row[field]).length);
     });
   });
 
-  const finalWidths = widths.map((width) => Math.min(maxWidth, width));
-  const border = `+${finalWidths.map((width) => "-".repeat(width + 2)).join("+")}+`;
+  const maxWidths = {
+    idx: 5,
+    id: ID_PREFIX_LENGTH,
+    subject: 24,
+    moment: 18,
+    created_at: 19,
+    body: 40,
+  };
 
+  const finalWidths = fields.map((field, index) =>
+    Math.min(maxWidths[field] ?? TABLE_MAX_WIDTH, widths[index])
+  );
+  const border = `+${finalWidths.map((width) => "-".repeat(width + 2)).join("+")}+`;
   const formatRow = (values) =>
     `| ${values
-      .map((value, index) => truncateCell(value, finalWidths[index]).padEnd(finalWidths[index]))
+      .map((value, index) => truncateCell(String(value), finalWidths[index]).padEnd(finalWidths[index]))
       .join(" | ")} |`;
 
   const header = formatRow(fields);
   const dataRows = rows.map((row) =>
-    formatRow(fields.map((field) => normalizeCellValue(row[field], field)))
+    formatRow(fields.map((field) => row[field]))
   );
 
-  return [border, header, border, ...dataRows, border];
-}
-
-function validateBodyLength(bus, body) {
-  if (body.length > MAX_BODY_LENGTH) {
-    bus.emit(
-      "output:append",
-      `Body excede ${MAX_BODY_LENGTH} caracteres. Reduza e tente novamente.`
-    );
-    return false;
-  }
-  return true;
+  return { lines: [border, header, border, ...dataRows, border], rows };
 }
 
 function resolveSelectFields(bus, fields) {
@@ -218,8 +236,6 @@ export function insertNoteCommand(bus) {
       return;
     }
 
-    if (!validateBodyLength(bus, body)) return;
-
     const { data, error: insertError } = await insertNote({
       client,
       userId: user.id,
@@ -231,6 +247,10 @@ export function insertNoteCommand(bus) {
 
     if (insertError) {
       bus.emit("output:append", `Erro ao inserir nota: ${insertError.message}`);
+      const hint = getBodyColumnMigrationHint(insertError);
+      if (hint) {
+        bus.emit("output:append", hint);
+      }
       return;
     }
 
@@ -268,9 +288,12 @@ export function selectNoteCommand(bus, focusManager) {
       }
     }
 
+    const baseFields = ["id", "subject", "moment", "body", "created_at"];
+    const selectFields = Array.from(new Set([...requestedFields, ...baseFields]));
+
     let query = client
       .from("notes")
-      .select(requestedFields.join(","))
+      .select(selectFields.join(","))
       .eq("user_id", user.id)
       .order("created_at", { ascending: false });
 
@@ -290,10 +313,30 @@ export function selectNoteCommand(bus, focusManager) {
 
     if (!data || data.length === 0) {
       bus.emit("output:append", "Nenhuma nota encontrada.");
+      clear();
       return;
     }
 
-    formatTableSQLServer(data, requestedFields).forEach((line) => bus.emit("output:append", line));
+    setList(data);
+    const { lines, rows } = formatNoteTable(data);
+    lines.forEach((line, index) => {
+      const rowIndex = index - 3;
+      if (rowIndex >= 0 && rowIndex < rows.length) {
+        bus.emit("output:append", {
+          text: line,
+          className: "terminal__line--clickable",
+          data: { openIndex: rowIndex + 1 },
+          onClick: () => {
+            const note = getByIndex(rowIndex + 1);
+            if (note) {
+              bus.emit("noteViewer:open", note);
+            }
+          },
+        });
+      } else {
+        bus.emit("output:append", line);
+      }
+    });
   };
 }
 
@@ -337,8 +380,6 @@ export function updateNoteCommand(bus) {
       return;
     }
 
-    if (updates.body && !validateBodyLength(bus, updates.body)) return;
-
     const { data, error: updateError } = await client
       .from("notes")
       .update(updates)
@@ -348,6 +389,10 @@ export function updateNoteCommand(bus) {
 
     if (updateError) {
       bus.emit("output:append", `Erro ao atualizar nota: ${updateError.message}`);
+      const hint = getBodyColumnMigrationHint(updateError);
+      if (hint) {
+        bus.emit("output:append", hint);
+      }
       return;
     }
 

@@ -1,7 +1,7 @@
 import { getSupabaseClient } from "../supabaseClient.js";
 import {
-  MAX_BODY_LENGTH,
   getAuthenticatedUser,
+  getBodyColumnMigrationHint,
   insertNote,
 } from "../notesService.js";
 import { getGeminiKey } from "../ai/aiConfig.js";
@@ -9,12 +9,15 @@ import { generateChallenge, evaluateAnswer } from "../ai/brainTrainEngine.js";
 import {
   clearBrainTrainSession,
   getBrainTrainSession,
+  recordBrainTrainResult,
+  setBrainTrainState,
   setBrainTrainCategory,
   setBrainTrainAnswer,
   setBrainTrainAttemptId,
   setBrainTrainFeedback,
   setBrainTrainContext,
   setBrainTrainLanguage,
+  startNextBrainTrainRound,
   startProgrammingSetup,
   startBrainTrainSession,
 } from "../brainTrain/brainTrainSession.js";
@@ -40,6 +43,29 @@ function finishCapture(bus) {
   bus.emit("router:capture:stop");
   bus.emit("input:unmask");
   bus.emit("input:placeholder", "");
+}
+
+function exitEditorIfProgramming(bus, session) {
+  if (session.mode === "programming") {
+    bus.emit("editor:close");
+  }
+}
+
+function normalizeDecisionValue(value) {
+  if (!value) return "";
+  return value
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+}
+
+function parseYesNo(value) {
+  if (isCancelInput(value)) return "cancel";
+  const normalized = normalizeDecisionValue(value);
+  if (["y", "s", "sim"].includes(normalized)) return "yes";
+  if (["n", "nao"].includes(normalized)) return "no";
+  return "invalid";
 }
 
 function parseKeyValuePairs(raw) {
@@ -109,14 +135,6 @@ function buildNoteBody({ prompt, answer, feedback, expected }) {
   return lines.join("\n");
 }
 
-function trimBody(body) {
-  if (body.length <= MAX_BODY_LENGTH) return { body, trimmed: false };
-  if (MAX_BODY_LENGTH <= 3) {
-    return { body: body.slice(0, MAX_BODY_LENGTH), trimmed: true };
-  }
-  const trimmed = body.slice(0, MAX_BODY_LENGTH - 3);
-  return { body: `${trimmed}...`, trimmed: true };
-}
 
 function buildAttemptPayload({
   userId,
@@ -231,19 +249,45 @@ async function updateAttemptNote({ client, userId, attemptId, noteId }) {
 
 async function handleNoteSave(bus, value, client, userId) {
   const session = getBrainTrainSession();
-  if (!session.active || !session.awaitingNote) {
+  if (!session.active || session.state !== "await_save_decision") {
+    return;
+  }
+
+  const decision = parseYesNo(value);
+  if (decision === "cancel") {
     finishCapture(bus);
-    return;
-  }
-
-  const input = value.trim().toLowerCase();
-  finishCapture(bus);
-
-  if (input !== "y" && input !== "yes") {
+    exitEditorIfProgramming(bus, session);
     clearBrainTrainSession();
-    bus.emit("output:append", "Treino salvo apenas no histórico.");
+    bus.emit("output:append", "Brain Train cancelado.");
     return;
   }
+
+  if (decision === "invalid") {
+    bus.emit("output:append", "Digite y/n.");
+    return;
+  }
+
+  if (decision === "no") {
+    finishCapture(bus);
+    bus.emit("output:append", "Treino salvo apenas no histórico.");
+    setBrainTrainState("await_continue_decision");
+    bus.emit("output:append", "Quer continuar treinando? (y/n)");
+    bus.emit("input:placeholder", "y/n");
+    bus.emit("router:capture:start", {
+      echo: "normal",
+      handler: (continueValue) =>
+        handleContinueDecision(bus, continueValue, client, userId),
+      onCancel: () => {
+        finishCapture(bus);
+        exitEditorIfProgramming(bus, session);
+        clearBrainTrainSession();
+        bus.emit("output:append", "Brain Train cancelado.");
+      },
+    });
+    return;
+  }
+
+  finishCapture(bus);
 
   const subject = `Brain Train: ${session.mode}`;
   const moment = "Daily Training";
@@ -253,50 +297,103 @@ async function handleNoteSave(bus, value, client, userId) {
     feedback: session.aiFeedback,
     expected: session.aiExpected,
   });
-  const { body, trimmed } = trimBody(bodyRaw);
-
   const { data, error } = await insertNote({
     client,
     userId,
     subject,
     moment,
-    body,
+    body: bodyRaw,
   });
 
   if (error || !data?.id) {
     bus.emit("output:append", "Erro ao salvar nota do Brain Train.");
+    const hint = getBodyColumnMigrationHint(error);
+    if (hint) {
+      bus.emit("output:append", hint);
+    }
+  } else {
+    const { error: updateError } = await updateAttemptNote({
+      client,
+      userId,
+      attemptId: session.attemptId,
+      noteId: data.id,
+    });
+
+    if (updateError) {
+      bus.emit("output:append", "Nota salva, mas não foi possível vincular ao treino.");
+    } else {
+      bus.emit("output:append", `Nota criada: ${data.id}`);
+      bus.emit("graph:refresh");
+    }
+  }
+
+  setBrainTrainState("await_continue_decision");
+  bus.emit("output:append", "Quer continuar treinando? (y/n)");
+  bus.emit("input:placeholder", "y/n");
+  bus.emit("router:capture:start", {
+    echo: "normal",
+    handler: (continueValue) =>
+      handleContinueDecision(bus, continueValue, client, userId),
+    onCancel: () => {
+      finishCapture(bus);
+      exitEditorIfProgramming(bus, session);
+      clearBrainTrainSession();
+      bus.emit("output:append", "Brain Train cancelado.");
+    },
+  });
+}
+
+async function handleContinueDecision(bus, value, client, userId) {
+  const session = getBrainTrainSession();
+  if (!session.active || session.state !== "await_continue_decision") {
+    return;
+  }
+
+  const decision = parseYesNo(value);
+  if (decision === "cancel") {
+    finishCapture(bus);
+    exitEditorIfProgramming(bus, session);
+    clearBrainTrainSession();
+    bus.emit("output:append", "Brain Train cancelado.");
+    return;
+  }
+
+  if (decision === "invalid") {
+    bus.emit("output:append", "Digite y/n.");
+    return;
+  }
+
+  if (decision === "no") {
+    finishCapture(bus);
+    exitEditorIfProgramming(bus, session);
+    bus.emit(
+      "output:append",
+      `Treino encerrado. Perguntas: ${session.totalQuestions} | Acertos: ${session.totalCorrect} | Pontos: ${session.totalPoints}`
+    );
     clearBrainTrainSession();
     return;
   }
 
-  if (trimmed) {
-    bus.emit(
-      "output:append",
-      `Nota salva com body reduzido para ${MAX_BODY_LENGTH} caracteres.`
-    );
+  finishCapture(bus);
+  const apiKey = ensureGeminiKey(bus);
+  if (!apiKey) {
+    exitEditorIfProgramming(bus, session);
+    clearBrainTrainSession();
+    return;
   }
-
-  const { error: updateError } = await updateAttemptNote({
-    client,
-    userId,
-    attemptId: session.attemptId,
-    noteId: data.id,
+  await startBrainTrain(bus, client, userId, apiKey, {
+    mode: session.mode,
+    difficulty: session.difficulty,
+    language: session.language,
+    category: session.category,
+    continueSession: true,
   });
-
-  if (updateError) {
-    bus.emit("output:append", "Nota salva, mas não foi possível vincular ao treino.");
-  } else {
-    bus.emit("output:append", `Nota criada: ${data.id}`);
-    bus.emit("graph:refresh");
-  }
-
-  clearBrainTrainSession();
 }
 
 async function handleAnswerCapture(bus, value, client, userId, apiKey) {
   const session = getBrainTrainSession();
-  if (!session.active || !session.awaitingAnswer) {
-    finishCapture(bus);
+  if (!session.active || session.state !== "await_answer") {
+    exitEditorIfProgramming(bus, session);
     return;
   }
 
@@ -305,6 +402,7 @@ async function handleAnswerCapture(bus, value, client, userId, apiKey) {
 
   if (normalized === "cancel" || normalized === "stop") {
     finishCapture(bus);
+    exitEditorIfProgramming(bus, session);
     clearBrainTrainSession();
     bus.emit("output:append", "Brain Train cancelado.");
     return;
@@ -316,6 +414,7 @@ async function handleAnswerCapture(bus, value, client, userId, apiKey) {
   }
 
   finishCapture(bus);
+  exitEditorIfProgramming(bus, session);
   setBrainTrainAnswer(input);
 
   let evaluation = null;
@@ -334,6 +433,7 @@ async function handleAnswerCapture(bus, value, client, userId, apiKey) {
   const isCorrect = Boolean(evaluation.isCorrect);
   const points = isCorrect ? POINTS_BY_DIFFICULTY[session.difficulty] : 0;
   const expected = normalizeExpected(evaluation.expectedAnswer);
+  recordBrainTrainResult({ isCorrect, points });
 
   const resultLabel = isCorrect ? "CORRETO" : "INCORRETO";
   bus.emit("output:append", `Resultado: ${resultLabel}`);
@@ -370,6 +470,7 @@ async function handleAnswerCapture(bus, value, client, userId, apiKey) {
 
   setBrainTrainAttemptId(attemptId);
   setBrainTrainFeedback({ feedback: evaluation.feedback, expected });
+  setBrainTrainState("await_save_decision");
 
   bus.emit("output:append", "");
   bus.emit("output:append", "Salvar este treino como nota? (y/n)");
@@ -390,7 +491,7 @@ async function startBrainTrain(
   client,
   userId,
   apiKey,
-  { mode, difficulty, language, category }
+  { mode, difficulty, language, category, continueSession = false }
 ) {
   let challenge = "";
   try {
@@ -401,7 +502,11 @@ async function startBrainTrain(
     return;
   }
 
-  startBrainTrainSession({ mode, difficulty, prompt: challenge });
+  if (continueSession) {
+    startNextBrainTrainRound({ prompt: challenge });
+  } else {
+    startBrainTrainSession({ mode, difficulty, prompt: challenge });
+  }
   setBrainTrainContext({ language, category });
 
   bus.emit("output:append", formatHeader(mode, difficulty));
@@ -413,14 +518,26 @@ async function startBrainTrain(
   bus.emit("input:placeholder", "digite sua resposta");
   bus.emit("input:unmask");
   bus.emit("router:capture:start", {
-    echo: "normal",
+    echo: mode === "programming" ? "none" : "normal",
     handler: (value) => handleAnswerCapture(bus, value, client, userId, apiKey),
     onCancel: () => {
       finishCapture(bus);
+      if (mode === "programming") {
+        bus.emit("editor:close");
+      }
       clearBrainTrainSession();
       bus.emit("output:append", "Brain Train cancelado.");
     },
   });
+
+  if (mode === "programming") {
+    bus.emit("editor:open", {
+      language,
+      tabSize: 2,
+      onSubmit: (code) => bus.emit("command:submit", { raw: code }),
+      onCancel: () => bus.emit("input:escape"),
+    });
+  }
 }
 
 async function showScore(bus, client, userId, scope) {

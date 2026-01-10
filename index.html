@@ -18,6 +18,7 @@
     </header>
     <div class="terminal__body">
       <main class="terminal__screen" id="output" aria-live="polite"></main>
+      <section class="editor-panel" id="editor-panel" hidden></section>
       <section class="graph-overlay" id="graph-overlay" hidden>
         <div class="graph-panel" role="dialog" aria-label="Grafo de notas">
           <header class="graph-panel__header">
@@ -62,6 +63,15 @@
       <span class="terminal__cursor" aria-hidden="true"></span>
     </form>
   </div>
+  <section class="note-viewer" id="note-viewer" hidden>
+    <div class="note-viewer__backdrop"></div>
+    <div class="note-viewer__panel" role="dialog" aria-label="Visualizador de nota">
+      <button type="button" class="note-viewer__close" aria-label="Fechar">×</button>
+      <h2 class="note-viewer__subject"></h2>
+      <div class="note-viewer__meta"></div>
+      <pre class="note-viewer__body"></pre>
+    </div>
+  </section>
   <script src="https://unpkg.com/cytoscape@3.26.0/dist/cytoscape.min.js"></script>
   <script type="module" src="app.js?v=2"></script>
 </body>
