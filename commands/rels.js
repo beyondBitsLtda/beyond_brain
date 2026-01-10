@@ -8,6 +8,7 @@ const lastDisambiguation = {
   from: [],
   to: [],
 };
+let pendingLink = null;
 
 function parseQuotedValue(value) {
   if (!value) return "";
@@ -67,6 +68,106 @@ function formatRelation(rel) {
 function formatDisambiguationOption(option, index) {
   const createdAt = option.created_at ? ` (${option.created_at})` : "";
   return `[${index + 1}] ${option.subject}${createdAt}`;
+}
+
+function normalizeSubject(value) {
+  return value.trim().toLowerCase();
+}
+
+function isSelection(value) {
+  return selectionRegex.test(value.trim());
+}
+
+function isSubjectReference(value) {
+  const trimmed = value.trim();
+  return !isSelection(trimmed) && !UUID_REGEX.test(trimmed);
+}
+
+function parseSelectionIndex(value) {
+  const match = selectionRegex.exec(value.trim());
+  if (!match) return null;
+  const selectionIndex = Number(match[1]);
+  if (Number.isNaN(selectionIndex)) return null;
+  return selectionIndex;
+}
+
+async function fetchNotesBySubject(client, userId, subject) {
+  const { data, error } = await client
+    .from("notes")
+    .select("id,subject,created_at")
+    .eq("subject", subject)
+    .eq("user_id", userId)
+    .order("created_at", { ascending: true });
+
+  if (error) {
+    return { error };
+  }
+
+  return { data: data ?? [] };
+}
+
+async function createRelation({
+  client,
+  userId,
+  fromId,
+  toId,
+  type,
+  bus,
+}) {
+  if (fromId === toId) {
+    bus.emit("output:append", "Não é permitido criar relação da nota com ela mesma.");
+    return;
+  }
+
+  const noteCheck = await ensureOwnedNotes(client, userId, [fromId, toId]);
+  if (!noteCheck.ok) {
+    bus.emit(
+      "output:append",
+      "Não é permitido criar relação com nota inexistente ou que pertença a outro usuário."
+    );
+    return;
+  }
+
+  const { data: existing, error: existingError } = await client
+    .from("note_relations")
+    .select("id")
+    .eq("from_note_id", fromId)
+    .eq("to_note_id", toId)
+    .eq("type", type)
+    .eq("user_id", userId)
+    .limit(1)
+    .maybeSingle();
+
+  if (existingError) {
+    bus.emit("output:append", `Erro ao verificar relação na note_relations: ${existingError.message}`);
+    return;
+  }
+
+  if (existing) {
+    bus.emit("output:append", "Essa relação já existe.");
+    return;
+  }
+
+  const { error: insertError } = await client
+    .from("note_relations")
+    .insert({
+      from_note_id: fromId,
+      to_note_id: toId,
+      type,
+      user_id: userId,
+    });
+
+  if (insertError) {
+    if (insertError.code === "23505") {
+      bus.emit("output:append", "Essa relação já existe.");
+      return;
+    }
+    bus.emit("output:append", `Erro ao criar relação na note_relations: ${insertError.message}`);
+    return;
+  }
+
+  bus.emit("output:append", `Relação criada: (${type}) ${fromId} -> ${toId}`);
+  bus.emit("graph:refresh");
 }
 
 async function resolveNoteReference({
@@ -153,6 +254,63 @@ export function linkCommand(bus) {
     const user = await getAuthenticatedUser(bus, client);
     if (!user) return;
 
+    if (pendingLink) {
+      const trimmed = raw.trim();
+      if (trimmed.toLowerCase() === "cancel") {
+        pendingLink = null;
+        bus.emit("output:append", "Operação de LINK cancelada.");
+        return;
+      }
+
+      const pairs = parseKeyValuePairs(raw);
+      const stage = pendingLink.stage;
+      const options = pendingLink.options ?? [];
+      const selectionSource = stage === "pick_from"
+        ? (pairs.from?.trim() || trimmed)
+        : (pairs.to?.trim() || trimmed);
+      const selectionIndex = parseSelectionIndex(selectionSource);
+      if (!selectionIndex || selectionIndex < 1 || selectionIndex > options.length) {
+        const label = stage === "pick_from" ? "from" : "to";
+        bus.emit(
+          "output:append",
+          `Seleção inválida para ${label}. Use #1 até #${options.length} ou "cancel".`
+        );
+        return;
+      }
+
+      const selected = options[selectionIndex - 1];
+      if (stage === "pick_from") {
+        pendingLink.fromSelectedId = selected.id;
+        pendingLink.stage = "pick_to";
+        bus.emit("output:append", "Selecione o destino (to) com #N:");
+        return;
+      }
+
+      const fromId = pendingLink.fromSelectedId;
+      if (!fromId) {
+        pendingLink = null;
+        bus.emit("output:append", "Seleção de origem perdida. Inicie o LINK novamente.");
+        return;
+      }
+      if (fromId === selected.id) {
+        bus.emit("output:append", "Não é permitido criar relação da nota com ela mesma.");
+        bus.emit("output:append", "Selecione um destino (to) diferente com #N:");
+        return;
+      }
+
+      const type = pendingLink.type;
+      pendingLink = null;
+      await createRelation({
+        client,
+        userId: user.id,
+        fromId,
+        toId: selected.id,
+        type,
+        bus,
+      });
+      return;
+    }
+
     const pairs = parseKeyValuePairs(raw);
     const from = pairs.from?.trim();
     const to = pairs.to?.trim();
@@ -164,6 +322,66 @@ export function linkCommand(bus) {
         "Uso: LINK from=\"uuid|subject\" to=\"uuid|subject\" type=\"...\""
       );
       return;
+    }
+
+    if (isSubjectReference(from) && isSubjectReference(to)) {
+      const normalizedFrom = normalizeSubject(from);
+      const normalizedTo = normalizeSubject(to);
+      if (normalizedFrom === normalizedTo) {
+        const { data, error: fetchError } = await fetchNotesBySubject(
+          client,
+          user.id,
+          from
+        );
+        if (fetchError) {
+          bus.emit("output:append", `Erro ao buscar nota por subject: ${fetchError.message}`);
+          return;
+        }
+
+        if (!data || data.length === 0) {
+          bus.emit("output:append", `Nota não encontrada para subject: ${from}`);
+          return;
+        }
+
+        if (data.length === 1) {
+          bus.emit("output:append", "Não é permitido LINK da nota para ela mesma.");
+          return;
+        }
+
+        if (data.length === 2) {
+          const [oldest, newest] = data;
+          bus.emit(
+            "output:append",
+            `Resolvido automaticamente: from=#1 (mais antiga) -> to=#2 (mais recente).`
+          );
+          await createRelation({
+            client,
+            userId: user.id,
+            fromId: oldest.id,
+            toId: newest.id,
+            type,
+            bus,
+          });
+          return;
+        }
+
+        bus.emit(
+          "output:append",
+          `Foram encontradas ${data.length} notas com o subject "${from}". Escolha a ORIGEM e o DESTINO:`
+        );
+        data
+          .map((option, index) => formatDisambiguationOption(option, index))
+          .forEach((line) => bus.emit("output:append", line));
+        bus.emit("output:append", "Selecione a origem (from) com #N:");
+        pendingLink = {
+          type,
+          subject: from,
+          options: data,
+          stage: "pick_from",
+          fromSelectedId: null,
+        };
+        return;
+      }
     }
 
     const resolvedFrom = await resolveNoteReference({
@@ -186,66 +404,14 @@ export function linkCommand(bus) {
     });
     if (!resolvedTo) return;
 
-    if (resolvedFrom.id === resolvedTo.id) {
-      bus.emit("output:append", "Não é permitido criar relação entre a mesma nota.");
-      return;
-    }
-
-    const noteCheck = await ensureOwnedNotes(client, user.id, [
-      resolvedFrom.id,
-      resolvedTo.id,
-    ]);
-    if (!noteCheck.ok) {
-      bus.emit(
-        "output:append",
-        "Não é permitido criar relação com nota inexistente ou que pertença a outro usuário."
-      );
-      return;
-    }
-
-    const { data: existing, error: existingError } = await client
-      .from("note_relations")
-      .select("id")
-      .eq("from_note_id", resolvedFrom.id)
-      .eq("to_note_id", resolvedTo.id)
-      .eq("type", type)
-      .eq("user_id", user.id)
-      .limit(1)
-      .maybeSingle();
-
-    if (existingError) {
-      bus.emit("output:append", `Erro ao verificar relação na note_relations: ${existingError.message}`);
-      return;
-    }
-
-    if (existing) {
-      bus.emit("output:append", "Essa relação já existe.");
-      return;
-    }
-
-    const { error: insertError } = await client
-      .from("note_relations")
-      .insert({
-        from_note_id: resolvedFrom.id,
-        to_note_id: resolvedTo.id,
-        type,
-        user_id: user.id,
-      });
-
-    if (insertError) {
-      if (insertError.code === "23505") {
-        bus.emit("output:append", "Essa relação já existe.");
-        return;
-      }
-      bus.emit("output:append", `Erro ao criar relação na note_relations: ${insertError.message}`);
-      return;
-    }
-
-    bus.emit(
-      "output:append",
-      `Relação criada: (${type}) ${resolvedFrom.id} -> ${resolvedTo.id}`
-    );
-    bus.emit("graph:refresh");
+    await createRelation({
+      client,
+      userId: user.id,
+      fromId: resolvedFrom.id,
+      toId: resolvedTo.id,
+      type,
+      bus,
+    });
   };
 }
 
