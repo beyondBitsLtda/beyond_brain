@@ -41,9 +41,13 @@ export function createTerminalUI(bus) {
         });
       }
       const actionItems = payload.actionPopover?.items;
+      const actionKey = payload.actionPopover?.key;
+      const actionTitle = payload.actionPopover?.title;
       if (typeof payload.onClick === "function" || Array.isArray(actionItems)) {
         line.addEventListener("click", (event) => {
-          if (Array.isArray(actionItems) && event.shiftKey) {
+          const handled = payload.onClick?.(event);
+          if (handled) return;
+          if (Array.isArray(actionItems)) {
             event.preventDefault();
             event.stopPropagation();
             const rect = line.getBoundingClientRect();
@@ -51,7 +55,7 @@ export function createTerminalUI(bus) {
               ...item,
               action: () => item.action?.(line),
             }));
-            actionPopover.open({
+            actionPopover.toggle(actionKey ?? null, {
               anchorRect: {
                 top: rect.top,
                 right: rect.right,
@@ -60,11 +64,10 @@ export function createTerminalUI(bus) {
                 width: rect.width,
                 height: rect.height,
               },
+              title: actionTitle,
               items,
             });
-            return;
           }
-          payload.onClick?.(event);
         });
       }
     }

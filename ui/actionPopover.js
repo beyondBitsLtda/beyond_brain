@@ -9,6 +9,14 @@ function createPopoverElement() {
   return popover;
 }
 
+function createTitleElement(text) {
+  if (!text) return null;
+  const title = document.createElement("div");
+  title.className = "action-popover__title";
+  title.textContent = text;
+  return title;
+}
+
 function positionPopover(popover, x, y) {
   const padding = 8;
   popover.style.left = `${x}px`;
@@ -45,6 +53,7 @@ export function createActionPopover() {
 
   const popover = createPopoverElement();
   let openState = false;
+  let currentKey = null;
   let cleanup = [];
 
   function removeListeners() {
@@ -57,11 +66,16 @@ export function createActionPopover() {
     popover.hidden = true;
     popover.innerHTML = "";
     openState = false;
+    currentKey = null;
     removeListeners();
   }
 
-  function open({ anchorRect, x, y, items = [] } = {}) {
+  function open({ anchorRect, x, y, title, items = [], key } = {}) {
     popover.innerHTML = "";
+    const titleEl = createTitleElement(title);
+    if (titleEl) {
+      popover.appendChild(titleEl);
+    }
     items.forEach((item) => {
       const button = document.createElement("button");
       button.type = "button";
@@ -84,6 +98,7 @@ export function createActionPopover() {
 
     popover.hidden = false;
     openState = true;
+    currentKey = key ?? null;
     const position = resolvePosition({ anchorRect, x, y });
     positionPopover(popover, position.x, position.y);
 
@@ -111,19 +126,41 @@ export function createActionPopover() {
       close();
     };
 
+    const handlePopoverPointerDown = (event) => {
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+    };
+
+    const handlePopoverClick = (event) => {
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+    };
+
     document.addEventListener("pointerdown", handlePointerDown);
     document.addEventListener("keydown", handleKeydown);
     window.addEventListener("scroll", handleScroll, { capture: true });
     window.addEventListener("resize", handleResize);
+    popover.addEventListener("pointerdown", handlePopoverPointerDown);
+    popover.addEventListener("click", handlePopoverClick);
 
     cleanup = [
       () => document.removeEventListener("pointerdown", handlePointerDown),
       () => document.removeEventListener("keydown", handleKeydown),
       () => window.removeEventListener("scroll", handleScroll, { capture: true }),
       () => window.removeEventListener("resize", handleResize),
+      () => popover.removeEventListener("pointerdown", handlePopoverPointerDown),
+      () => popover.removeEventListener("click", handlePopoverClick),
     ];
   }
 
-  instance = { open, close };
+  function toggle(key, options = {}) {
+    if (openState && key && currentKey === key) {
+      close();
+      return;
+    }
+    open({ ...options, key });
+  }
+
+  instance = { open, close, toggle };
   return instance;
 }

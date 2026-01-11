@@ -16,6 +16,7 @@ import {
   getRelationPickerState,
   startRelationPicker,
 } from "../state/relationPickerState.js";
+import { listRelationsForNote } from "./rels.js";
 import { createConfirmModal } from "../ui/confirmModal.js";
 import { createRelationModal } from "../ui/relationModal.js";
 const NOTE_FIELDS = ["id", "subject", "moment", "body", "ref", "created_at"];
@@ -308,19 +309,13 @@ function renderNotesOutput(bus, notes) {
           noteId: note?.id,
           idx: `#${rowIndex + 1}`,
         },
-        onClick: () => {
-          if (handleRelationTargetSelection(bus, note)) {
-            return;
-          }
-          const selected = getByIndex(rowIndex + 1);
-          if (selected) {
-            bus.emit("noteViewer:open", selected);
-          }
-        },
+        onClick: () => handleRelationTargetSelection(bus, note),
         actionPopover: {
+          key: `row:${note?.id ?? rowIndex}`,
+          title: note?.subject ?? "Nota",
           items: [
             {
-              label: "Abrir",
+              label: "Ver nota",
               action: () => {
                 const selected = getByIndex(rowIndex + 1);
                 if (selected) {
@@ -332,6 +327,13 @@ function renderNotesOutput(bus, notes) {
               label: "Criar relação...",
               action: () => {
                 startRelationPickerFromNote(bus, note);
+              },
+            },
+            {
+              label: "Consultar relações",
+              action: () => {
+                if (!note?.id) return;
+                listRelationsForNote(bus, note.id);
               },
             },
             {
