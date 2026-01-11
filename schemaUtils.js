@@ -57,7 +57,7 @@ export async function ensureNoteIdeaColumns({ client, userId, bus } = {}) {
   if (!client || !userId) return false;
   const { error } = await client
     .from("notes")
-    .select("is_idea,idea_level")
+    .select("is_idea,idea_level,level_set")
     .eq("user_id", userId)
     .limit(1);
   if (error) {

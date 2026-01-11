@@ -62,18 +62,16 @@ function formatDateTime(value) {
   ].join(" ");
 }
 
-async function updateNoteIdea({ bus, client, user, noteId, isIdea, ideaLevel }) {
+async function updateInsightStatus({ bus, client, user, noteId, isIdea }) {
   const hasIdeaColumns = await ensureNoteIdeaColumns({ client, userId: user.id, bus });
   if (!hasIdeaColumns) {
     bus.emit("output:append", "Não foi possível atualizar ideias sem as colunas de ideia.");
     return false;
   }
 
-  const level = Math.min(Math.max(Number(ideaLevel ?? 1), 1), 3);
   const updates = isIdea
     ? {
         is_idea: true,
-        idea_level: level,
         idea_source: "manual",
         idea_marked_at: new Date().toISOString(),
       }
@@ -88,7 +86,7 @@ async function updateNoteIdea({ bus, client, user, noteId, isIdea, ideaLevel }) 
     .update(updates)
     .eq("id", noteId)
     .eq("user_id", user.id)
-    .select("id,is_idea,idea_level,subject");
+    .select("id,is_idea,idea_level,level_set,subject");
 
   if (error) {
     bus.emit("output:append", `Erro ao atualizar ideia: ${error.message}`);
@@ -106,9 +104,77 @@ async function updateNoteIdea({ bus, client, user, noteId, isIdea, ideaLevel }) 
   bus.emit("graph:node:update", {
     id: noteId,
     is_idea: data[0]?.is_idea ?? isIdea,
-    idea_level: isIdea
-      ? data[0]?.idea_level ?? updates.idea_level
-      : null,
+    idea_level: data[0]?.idea_level,
+    level_set: data[0]?.level_set,
+    subject: data[0]?.subject,
+  });
+  return true;
+}
+
+async function updateLevelStatus({ bus, client, user, noteId, ideaLevel }) {
+  const hasIdeaColumns = await ensureNoteIdeaColumns({ client, userId: user.id, bus });
+  if (!hasIdeaColumns) {
+    bus.emit("output:append", "Não foi possível atualizar níveis sem as colunas de ideia.");
+    return false;
+  }
+
+  const level = Math.min(Math.max(Number(ideaLevel ?? 1), 1), 3);
+  const { data, error } = await client
+    .from("notes")
+    .update({ idea_level: level, level_set: true })
+    .eq("id", noteId)
+    .eq("user_id", user.id)
+    .select("id,is_idea,idea_level,level_set,subject");
+
+  if (error) {
+    bus.emit("output:append", `Erro ao atualizar nível: ${error.message}`);
+    return false;
+  }
+  if (!data || data.length === 0) {
+    bus.emit("output:append", "Nenhuma nota encontrada para atualizar.");
+    return false;
+  }
+
+  bus.emit("output:append", `Nível definido como ${level}.`);
+  bus.emit("graph:node:update", {
+    id: noteId,
+    is_idea: data[0]?.is_idea ?? false,
+    idea_level: data[0]?.idea_level ?? level,
+    level_set: data[0]?.level_set ?? true,
+    subject: data[0]?.subject,
+  });
+  return true;
+}
+
+async function clearLevelStatus({ bus, client, user, noteId }) {
+  const hasIdeaColumns = await ensureNoteIdeaColumns({ client, userId: user.id, bus });
+  if (!hasIdeaColumns) {
+    bus.emit("output:append", "Não foi possível remover nível sem as colunas de ideia.");
+    return false;
+  }
+
+  const { data, error } = await client
+    .from("notes")
+    .update({ level_set: false })
+    .eq("id", noteId)
+    .eq("user_id", user.id)
+    .select("id,is_idea,idea_level,level_set,subject");
+
+  if (error) {
+    bus.emit("output:append", `Erro ao remover nível: ${error.message}`);
+    return false;
+  }
+  if (!data || data.length === 0) {
+    bus.emit("output:append", "Nenhuma nota encontrada para atualizar.");
+    return false;
+  }
+
+  bus.emit("output:append", "Nível removido.");
+  bus.emit("graph:node:update", {
+    id: noteId,
+    is_idea: data[0]?.is_idea ?? false,
+    idea_level: data[0]?.idea_level,
+    level_set: data[0]?.level_set ?? false,
     subject: data[0]?.subject,
   });
   return true;
@@ -137,7 +203,7 @@ export function ideaCommand(bus) {
 
       const { data, error: queryError } = await client
         .from("notes")
-        .select("id,subject,created_at,idea_level")
+        .select("id,subject,created_at,idea_level,level_set")
         .eq("user_id", user.id)
         .eq("is_idea", true)
         .order("created_at", { ascending: false });
@@ -155,7 +221,7 @@ export function ideaCommand(bus) {
       bus.emit("output:append", "Ideias marcadas:");
       data.forEach((note, index) => {
         const createdAt = formatDateTime(note.created_at ?? "");
-        const level = note.idea_level ?? 1;
+        const level = note.level_set ? note.idea_level ?? 1 : "-";
         bus.emit(
           "output:append",
           `- [${index + 1}] (nível ${level}) ${note.subject ?? ""} | ${createdAt}`
@@ -190,7 +256,7 @@ export function ideaCommand(bus) {
         bus.emit("output:append", "Uso: IDEA off \"#N\" | IDEA off id=\"uuid\"");
         return;
       }
-      await updateNoteIdea({ bus, client, user, noteId, isIdea: false, ideaLevel: 1 });
+      await updateInsightStatus({ bus, client, user, noteId, isIdea: false });
       return;
     }
 
@@ -207,7 +273,7 @@ export function ideaCommand(bus) {
         bus.emit("output:append", "Uso: IDEA level \"#N\" set=2 | IDEA level id=\"uuid\" set=2");
         return;
       }
-      await updateNoteIdea({ bus, client, user, noteId, isIdea: true, ideaLevel: level });
+      await updateLevelStatus({ bus, client, user, noteId, ideaLevel: level });
       return;
     }
 
@@ -217,6 +283,6 @@ export function ideaCommand(bus) {
       bus.emit("output:append", "Uso: IDEA note \"#N\" | IDEA id=\"uuid\"");
       return;
     }
-    await updateNoteIdea({ bus, client, user, noteId, isIdea: true, ideaLevel: 1 });
+    await updateInsightStatus({ bus, client, user, noteId, isIdea: true });
   };
 }

@@ -22,9 +22,10 @@ const HELP_TEXT = `Comandos disponíveis:
 - REL REINFORCE from="..." to="..." type="...": reforça relação (+1)
 - rels: lista todas as relações do usuário
 - rels note "uuid": lista relações de uma nota específica
-- IDEA note "#N" | IDEA id="uuid": marca nota como ideia
-- IDEA off "#N" | IDEA off id="uuid": remove marcação de ideia
-- IDEA level "#N" set=1..3: ajusta nível de ideia
+- IDEA note "#N" | IDEA id="uuid": marca nota como insight
+- IDEA off "#N" | IDEA off id="uuid": remove marcação de insight
+- IDEA level "#N" set=1..3: ajusta nível de insight
+- LEVEL off "#N" | LEVEL off id="uuid": remove nível definido
 - IDEAS: lista notas marcadas como ideia
 - graph: alterna o grafo das notas
 - graph note "uuid" [1|2]: foca no subgrafo da nota

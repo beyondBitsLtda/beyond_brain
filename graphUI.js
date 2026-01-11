@@ -49,18 +49,11 @@ function clampIdeaLevel(value) {
   return Math.min(Math.max(value, IDEA_LEVEL_MIN), IDEA_LEVEL_MAX);
 }
 
-function buildDisplayLabel({ shortLabel: shortLabelValue, isIdea, ideaLevel }) {
-  const pieces = [];
-  if (isIdea) {
-    pieces.push("★");
+function buildDisplayLabel({ shortLabel: shortLabelValue, levelSet, ideaLevel }) {
+  if (!levelSet) {
+    return shortLabelValue;
   }
-  if (ideaLevel) {
-    pieces.push(`${ideaLevel} ·`);
-  }
-  if (pieces.length > 0) {
-    return `${pieces.join(" ")} ${shortLabelValue}`;
-  }
-  return shortLabelValue;
+  return `${ideaLevel} · ${shortLabelValue}`;
 }
 
 function buildSubgraph(noteId, depth, relations) {
@@ -92,9 +85,10 @@ function mapElements(notes, relations, allowedIds) {
     .filter((note) => noteSet.has(note.id))
     .map((note) => {
       const isIdea = Boolean(note.is_idea);
-      const ideaLevel = isIdea ? clampIdeaLevel(Number(note.idea_level ?? 1)) : null;
+      const levelSet = Boolean(note.level_set);
+      const ideaLevel = clampIdeaLevel(Number(note.idea_level ?? 1));
       const shortLabelValue = shortLabel(note.subject ?? "");
-      const levelLabel = ideaLevel ? String(ideaLevel) : "";
+      const levelLabel = levelSet ? String(ideaLevel) : "";
       return {
         data: {
           id: note.id,
@@ -103,11 +97,11 @@ function mapElements(notes, relations, allowedIds) {
           created_at: note.created_at ?? "",
           is_idea: isIdea,
           idea_level: ideaLevel,
-          level_label: levelLabel,
+          level_set: levelSet,
           short_label: shortLabelValue,
-          display_label: buildDisplayLabel({
+          displayLabel: buildDisplayLabel({
             shortLabel: shortLabelValue,
-            isIdea,
+            levelSet,
             ideaLevel: levelLabel,
           }),
         },
@@ -195,6 +189,7 @@ export function createGraphUI(bus, focusManager) {
       nodeBorder: styles.getPropertyValue("--node-border").trim(),
       insightNodeBg: styles.getPropertyValue("--insight-node-bg").trim(),
       insightNodeFg: styles.getPropertyValue("--insight-node-fg").trim(),
+      insightNodeBorder: styles.getPropertyValue("--insight-node-border").trim(),
       levelBadgeBg: styles.getPropertyValue("--level-badge-bg").trim(),
       levelBadgeFg: styles.getPropertyValue("--level-badge-fg").trim(),
       edgeColor: styles.getPropertyValue("--edge-color").trim(),
@@ -299,15 +294,14 @@ export function createGraphUI(bus, focusManager) {
       nodeBorder,
       insightNodeBg,
       insightNodeFg,
+      insightNodeBorder,
       levelBadgeBg,
       levelBadgeFg,
       accent,
       edgeColor,
       edgeStrongColor,
       edgeGlowColor,
-      ideaBorderColor,
       ideaGlowColor,
-      ideaBadgeColor,
     } = tokens;
 
     const edgeBase = getEdgeStyle({ edgeColor, edgeStrongColor, edgeGlowColor });
@@ -343,7 +337,7 @@ export function createGraphUI(bus, focusManager) {
           "border-color": nodeBorder,
           "border-width": 1,
           color: nodeFg,
-          label: "data(display_label)",
+          label: "data(displayLabel)",
           "font-size": 10,
           "text-wrap": "wrap",
           "text-max-width": 80,
@@ -358,45 +352,18 @@ export function createGraphUI(bus, focusManager) {
         style: {
           "background-color": insightNodeBg,
           color: insightNodeFg,
-          "border-color": ideaBorderColor || nodeBorder,
+          "border-color": insightNodeBorder || nodeBorder,
           "border-width": 2,
           "shadow-color": ideaGlowColor,
           "shadow-opacity": 0.5,
         },
       },
       {
-        selector: "node[idea_level]",
+        selector: "node[level_set]",
         style: {
           "text-outline-color": levelBadgeBg,
           "text-outline-width": 2,
           color: levelBadgeFg || nodeFg,
-        },
-      },
-      {
-        selector: "node[is_idea][idea_level = 1]",
-        style: {
-          width: 34,
-          height: 34,
-          "shadow-blur": 6,
-          color: ideaBadgeColor || fg,
-        },
-      },
-      {
-        selector: "node[is_idea][idea_level = 2]",
-        style: {
-          width: 38,
-          height: 38,
-          "shadow-blur": 10,
-          color: ideaBadgeColor || fg,
-        },
-      },
-      {
-        selector: "node[is_idea][idea_level = 3]",
-        style: {
-          width: 42,
-          height: 42,
-          "shadow-blur": 14,
-          color: ideaBadgeColor || fg,
         },
       },
       {
@@ -506,6 +473,7 @@ export function createGraphUI(bus, focusManager) {
         return;
       }
       const isIdea = Boolean(data.is_idea);
+      const levelSet = Boolean(data.level_set);
       openActionPopoverAtEvent(
         `node:${data.id}`,
         event,
@@ -530,17 +498,16 @@ export function createGraphUI(bus, focusManager) {
             },
           },
           {
-            label: isIdea ? "Remover ideia" : "Marcar como ideia",
+            label: isIdea ? "Remover Insight" : "Marcar como Insight",
             action: () => {
               updateNoteIdeaStatus({
                 noteId: data.id,
                 isIdea: !isIdea,
-                ideaLevel: clampIdeaLevel(Number(data.idea_level ?? 1)),
               });
             },
           },
           {
-            label: "Ajustar nível (1..3)",
+            label: "Definir nível (1..3)",
             action: () => {
               openActionPopoverAtEvent(
                 `node:${data.id}:idea-level`,
@@ -548,15 +515,21 @@ export function createGraphUI(bus, focusManager) {
                 [1, 2, 3].map((level) => ({
                   label: `Nível ${level}`,
                   action: () => {
-                    updateNoteIdeaStatus({
-                      noteId: data.id,
-                      isIdea: true,
-                      ideaLevel: level,
-                    });
+                    updateNoteLevelStatus({ noteId: data.id, level });
                   },
                 })),
                 "Nível da ideia"
               );
+            },
+          },
+          {
+            label: "Remover nível",
+            action: () => {
+              if (!levelSet) {
+                bus.emit("output:append", "Este nodo não possui nível definido.");
+                return;
+              }
+              clearNoteLevelStatus({ noteId: data.id });
             },
           },
           {
@@ -718,6 +691,7 @@ export function createGraphUI(bus, focusManager) {
       "body",
       hasNoteIdea ? "is_idea" : null,
       hasNoteIdea ? "idea_level" : null,
+      hasNoteIdea ? "level_set" : null,
     ]
       .filter(Boolean)
       .join(",");
@@ -822,9 +796,15 @@ export function createGraphUI(bus, focusManager) {
 
   bus.on("graph:node:update", (payload = {}) => {
     if (!isOpen || !cy) return;
-    const { id, is_idea, idea_level, subject } = payload;
+    const { id, is_idea, idea_level, level_set, subject } = payload;
     if (!id) return;
-    updateNodeIdeaState({ noteId: id, isIdea: Boolean(is_idea), ideaLevel: idea_level, subject });
+    updateNodeIdeaState({
+      noteId: id,
+      isIdea: Boolean(is_idea),
+      ideaLevel: idea_level,
+      levelSet: level_set,
+      subject,
+    });
   });
 
   bus.on("connect:start", ({ fromNoteId, fromSubject } = {}) => {
@@ -1045,31 +1025,32 @@ export function createGraphUI(bus, focusManager) {
     return { ok: true };
   }
 
-  function updateNodeIdeaState({ noteId, isIdea, ideaLevel, subject }) {
+  function updateNodeIdeaState({ noteId, isIdea, ideaLevel, levelSet, subject }) {
     if (!cy || !noteId) return;
     const node = cy.getElementById(noteId);
     if (!node || node.length === 0) return;
-    const level = isIdea ? clampIdeaLevel(Number(ideaLevel ?? 1)) : null;
-    const levelLabel = level ? String(level) : "";
+    const level = clampIdeaLevel(Number(ideaLevel ?? 1));
+    const levelIsSet = Boolean(levelSet);
+    const levelLabel = levelIsSet ? String(level) : "";
     const nextSubject = subject ?? node.data("subject") ?? "";
     const shortLabelValue = shortLabel(nextSubject);
 
     node.data("subject", nextSubject);
     node.data("is_idea", isIdea);
     node.data("idea_level", level);
-    node.data("level_label", levelLabel);
+    node.data("level_set", levelIsSet);
     node.data("short_label", shortLabelValue);
     node.data(
-      "display_label",
+      "displayLabel",
       buildDisplayLabel({
         shortLabel: shortLabelValue,
-        isIdea,
+        levelSet: levelIsSet,
         ideaLevel: levelLabel,
       })
     );
   }
 
-  async function updateNoteIdeaStatus({ noteId, isIdea, ideaLevel }) {
+  async function updateNoteIdeaStatus({ noteId, isIdea }) {
     if (!noteId) return;
     const clientResponse = getSupabaseClient();
     if (clientResponse.error || !clientResponse.client) {
@@ -1090,11 +1071,9 @@ export function createGraphUI(bus, focusManager) {
       return;
     }
 
-    const level = clampIdeaLevel(Number(ideaLevel ?? 1));
     const updates = isIdea
       ? {
           is_idea: true,
-          idea_level: level,
           idea_source: "manual",
           idea_marked_at: new Date().toISOString(),
         }
@@ -1109,7 +1088,7 @@ export function createGraphUI(bus, focusManager) {
       .update(updates)
       .eq("id", noteId)
       .eq("user_id", user.id)
-      .select("id,is_idea,idea_level,subject");
+      .select("id,is_idea,idea_level,level_set,subject");
 
     if (error) {
       bus.emit("output:append", `Erro ao atualizar ideia: ${error.message}`);
@@ -1128,7 +1107,103 @@ export function createGraphUI(bus, focusManager) {
     updateNodeIdeaState({
       noteId,
       isIdea,
-      ideaLevel: data[0]?.idea_level ?? ideaLevel,
+      ideaLevel: data[0]?.idea_level,
+      levelSet: data[0]?.level_set,
+      subject: data[0]?.subject,
+    });
+  }
+
+  async function updateNoteLevelStatus({ noteId, level }) {
+    if (!noteId) return;
+    const clientResponse = getSupabaseClient();
+    if (clientResponse.error || !clientResponse.client) {
+      bus.emit("output:append", "Supabase não configurado. Use auth --register ou auth para autenticar.");
+      return;
+    }
+
+    const user = await getAuthenticatedUser(clientResponse.client);
+    if (!user) return;
+
+    const hasIdeaColumns = await ensureNoteIdeaColumns({
+      client: clientResponse.client,
+      userId: user.id,
+      bus,
+    });
+    if (!hasIdeaColumns) {
+      bus.emit("output:append", "Não foi possível atualizar níveis sem as colunas de ideia.");
+      return;
+    }
+
+    const normalizedLevel = clampIdeaLevel(Number(level ?? 1));
+    const { data, error } = await clientResponse.client
+      .from("notes")
+      .update({ idea_level: normalizedLevel, level_set: true })
+      .eq("id", noteId)
+      .eq("user_id", user.id)
+      .select("id,is_idea,idea_level,level_set,subject");
+
+    if (error) {
+      bus.emit("output:append", `Erro ao atualizar nível: ${error.message}`);
+      return;
+    }
+    if (!data || data.length === 0) {
+      bus.emit("output:append", "Nenhuma nota encontrada para atualizar.");
+      return;
+    }
+
+    bus.emit("output:append", `Nível definido como ${normalizedLevel}.`);
+    updateNodeIdeaState({
+      noteId,
+      isIdea: Boolean(data[0]?.is_idea),
+      ideaLevel: data[0]?.idea_level,
+      levelSet: data[0]?.level_set,
+      subject: data[0]?.subject,
+    });
+  }
+
+  async function clearNoteLevelStatus({ noteId }) {
+    if (!noteId) return;
+    const clientResponse = getSupabaseClient();
+    if (clientResponse.error || !clientResponse.client) {
+      bus.emit("output:append", "Supabase não configurado. Use auth --register ou auth para autenticar.");
+      return;
+    }
+
+    const user = await getAuthenticatedUser(clientResponse.client);
+    if (!user) return;
+
+    const hasIdeaColumns = await ensureNoteIdeaColumns({
+      client: clientResponse.client,
+      userId: user.id,
+      bus,
+    });
+    if (!hasIdeaColumns) {
+      bus.emit("output:append", "Não foi possível remover nível sem as colunas de ideia.");
+      return;
+    }
+
+    const { data, error } = await clientResponse.client
+      .from("notes")
+      .update({ level_set: false })
+      .eq("id", noteId)
+      .eq("user_id", user.id)
+      .select("id,is_idea,idea_level,level_set,subject");
+
+    if (error) {
+      bus.emit("output:append", `Erro ao remover nível: ${error.message}`);
+      return;
+    }
+    if (!data || data.length === 0) {
+      bus.emit("output:append", "Nenhuma nota encontrada para atualizar.");
+      return;
+    }
+
+    bus.emit("output:append", "Nível removido.");
+    updateNodeIdeaState({
+      noteId,
+      isIdea: Boolean(data[0]?.is_idea),
+      ideaLevel: data[0]?.idea_level,
+      levelSet: data[0]?.level_set,
       subject: data[0]?.subject,
     });
   }

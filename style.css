@@ -34,6 +34,7 @@
   --node-border: var(--border);
   --insight-node-bg: #00ff7a;
   --insight-node-fg: #001409;
+  --insight-node-border: var(--accent);
   --level-badge-bg: var(--bg);
   --level-badge-fg: var(--fg);
 }

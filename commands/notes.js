@@ -264,11 +264,9 @@ async function updateNoteIdea({ bus, noteId, isIdea, ideaLevel }) {
     return { ok: false };
   }
 
-  const level = Number.isFinite(ideaLevel) ? ideaLevel : 1;
   const updates = isIdea
     ? {
         is_idea: true,
-        idea_level: Math.min(Math.max(level, 1), 3),
         idea_source: "manual",
         idea_marked_at: new Date().toISOString(),
       }
@@ -283,7 +281,7 @@ async function updateNoteIdea({ bus, noteId, isIdea, ideaLevel }) {
     .update(updates)
     .eq("id", noteId)
     .eq("user_id", user.id)
-    .select("id,is_idea,idea_level,subject");
+    .select("id,is_idea,idea_level,level_set,subject");
 
   if (updateError) {
     bus.emit("output:append", `Erro ao atualizar ideia: ${updateError.message}`);
@@ -302,8 +300,9 @@ async function updateNoteIdea({ bus, noteId, isIdea, ideaLevel }) {
     id: noteId,
     is_idea: data[0]?.is_idea ?? isIdea,
     idea_level: isIdea
-      ? data[0]?.idea_level ?? updates.idea_level
-      : null,
+      ? data[0]?.idea_level ?? ideaLevel
+      : data[0]?.idea_level ?? null,
+    level_set: data[0]?.level_set,
     subject: data[0]?.subject,
   });
   return { ok: true, note: data[0] };
@@ -406,7 +405,7 @@ function renderNotesOutput(bus, notes) {
               },
             },
             {
-              label: note?.is_idea ? "Remover ideia" : "Marcar como ideia",
+              label: note?.is_idea ? "Remover Insight" : "Marcar como Insight",
               action: async () => {
                 if (!note?.id) return;
                 const result = await updateNoteIdea({
