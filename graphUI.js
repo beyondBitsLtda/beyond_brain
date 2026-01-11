@@ -3,12 +3,13 @@ import { clearSession } from "./sessionStore.js";
 import { getCurrentTheme } from "./themeManager.js";
 import { createGraphNoteWindow } from "./graphNoteWindow.js";
 import { createContextMenu } from "./ui/contextMenu.js";
+import { createConfirmModal } from "./ui/confirmModal.js";
+import { createRelationModal } from "./ui/relationModal.js";
 import { clearDeleteBySubjectState } from "./state/deleteBySubjectState.js";
 
 const LABEL_LIMIT = 24;
 const DEPTH_MIN = 1;
 const DEPTH_MAX = 2;
-const RELATION_TYPES = ["related", "ref", "expands", "contradicts"];
 
 function shortLabel(text = "") {
   const trimmed = text.trim();
@@ -88,6 +89,9 @@ export function createGraphUI(bus, focusManager) {
   const detailCreated = document.getElementById("graph-detail-created");
   const noteWindow = createGraphNoteWindow(overlay);
   const contextMenu = createContextMenu();
+  const confirmModal = createConfirmModal(overlay);
+  const relationModal = createRelationModal(overlay);
+  const connectToast = createGraphToast(overlay);
 
   let cy = null;
   let isOpen = false;
@@ -95,11 +99,30 @@ export function createGraphUI(bus, focusManager) {
   let edgePulseFrame = null;
   let edgePulseStart = null;
   let noteBodies = new Map();
+  let noteSubjects = new Map();
   let connectMode = {
     active: false,
     fromNoteId: null,
     fromSubject: "",
   };
+
+  function createGraphToast(container) {
+    const toast = document.createElement("div");
+    toast.className = "graph-toast";
+    toast.hidden = true;
+    container.appendChild(toast);
+
+    return {
+      show(message) {
+        toast.textContent = message;
+        toast.hidden = false;
+      },
+      hide() {
+        toast.hidden = true;
+        toast.textContent = "";
+      },
+    };
+  }
 
   function getThemeTokens() {
     const styles = getComputedStyle(document.documentElement);
@@ -220,6 +243,16 @@ export function createGraphUI(bus, focusManager) {
           color: bg,
         },
       },
+      {
+        selector: "node.connect-source",
+        style: {
+          "border-color": accent,
+          "border-width": 3,
+          "shadow-blur": 10,
+          "shadow-color": accent,
+          "shadow-opacity": 0.6,
+        },
+      },
     ]);
     updateSteveEdgePulse();
   }
@@ -281,6 +314,16 @@ export function createGraphUI(bus, focusManager) {
           style: {
             "background-color": accent,
             color: bg,
+          },
+        },
+        {
+          selector: "node.connect-source",
+          style: {
+            "border-color": accent,
+            "border-width": 3,
+            "shadow-blur": 10,
+            "shadow-color": accent,
+            "shadow-opacity": 0.6,
           },
         },
       ],
@@ -407,6 +450,7 @@ export function createGraphUI(bus, focusManager) {
     const notes = notesResponse.data ?? [];
     const relations = relsResponse.data ?? [];
     noteBodies = new Map(notes.map((note) => [note.id, note.body ?? ""]));
+    noteSubjects = new Map(notes.map((note) => [note.id, note.subject ?? ""]));
 
     if (notes.length === 0) {
       emptyState.hidden = false;
@@ -503,58 +547,122 @@ export function createGraphUI(bus, focusManager) {
       fromNoteId,
       fromSubject: fromSubject ?? "",
     };
-    bus.emit(
-      "output:append",
-      "Selecione o nó de destino (clique) ou ESC para cancelar."
-    );
+    setConnectHighlight(fromNoteId, true);
+    connectToast.show("Selecione o nó de destino ou pressione ESC para cancelar.");
   }
 
   function cancelConnectMode() {
     if (!connectMode.active) return;
+    setConnectHighlight(connectMode.fromNoteId, false);
     connectMode = { active: false, fromNoteId: null, fromSubject: "" };
+    connectToast.hide();
+    relationModal.close();
     bus.emit("output:append", "Modo de conexão cancelado.");
   }
 
-  function handleConnectTarget(targetData) {
+  function finishConnectMode() {
+    if (!connectMode.active) return;
+    setConnectHighlight(connectMode.fromNoteId, false);
+    connectMode = { active: false, fromNoteId: null, fromSubject: "" };
+    connectToast.hide();
+  }
+
+  function setConnectHighlight(noteId, enabled) {
+    if (!noteId || !cy) return;
+    const node = cy.getElementById(noteId);
+    if (!node || node.length === 0) return;
+    if (enabled) {
+      node.addClass("connect-source");
+    } else {
+      node.removeClass("connect-source");
+    }
+  }
+
+  async function resolveNoteSubject(noteId, fallback = "") {
+    if (noteSubjects.has(noteId)) {
+      return noteSubjects.get(noteId) || fallback;
+    }
+    const clientResponse = getSupabaseClient();
+    if (clientResponse.error || !clientResponse.client) {
+      return fallback;
+    }
+    const user = await getAuthenticatedUser(clientResponse.client);
+    if (!user) return fallback;
+    const { data, error } = await clientResponse.client
+      .from("notes")
+      .select("subject")
+      .eq("id", noteId)
+      .eq("user_id", user.id)
+      .maybeSingle();
+    if (error) return fallback;
+    const subject = data?.subject ?? fallback;
+    noteSubjects.set(noteId, subject);
+    return subject;
+  }
+
+  function showInvalidRelationModal() {
+    confirmModal.open({
+      title: "Conexão inválida",
+      message: "Não é permitido ligar a nota a ela mesma.",
+      confirmLabel: "Ok",
+      cancelLabel: "Fechar",
+      onConfirm: () => {
+        confirmModal.close();
+      },
+      onCancel: () => {
+        confirmModal.close();
+      },
+    });
+  }
+
+  async function handleConnectTarget(targetData) {
     if (!connectMode.active) return;
     if (!targetData?.id) return;
     if (connectMode.fromNoteId === targetData.id) {
-      bus.emit("output:append", "Selecione um nó diferente para criar a relação.");
+      showInvalidRelationModal();
       return;
     }
-    promptRelationType(connectMode.fromNoteId, targetData.id);
-  }
-
-  function promptRelationType(fromId, toId) {
-    const choices = RELATION_TYPES.join(", ");
-    bus.emit(
-      "output:append",
-      `Tipo da relação (${choices}). Enter para "related".`
-    );
-    bus.emit("input:placeholder", "related");
-    bus.emit("input:focus");
-    bus.emit("router:capture:start", {
-      echo: "normal",
-      handler: async (value) => {
-        bus.emit("router:capture:stop");
-        bus.emit("input:placeholder", "");
-        const normalized = value.trim().toLowerCase();
-        if (normalized === "cancel") {
-          cancelConnectMode();
-          return;
+    const fromSubject =
+      connectMode.fromSubject ||
+      (await resolveNoteSubject(connectMode.fromNoteId, "(sem assunto)"));
+    const toSubject = await resolveNoteSubject(targetData.id, targetData.subject ?? "(sem assunto)");
+    relationModal.open({
+      fromNote: { id: connectMode.fromNoteId, subject: fromSubject },
+      toNote: { id: targetData.id, subject: toSubject },
+      defaultType: "related",
+      onConfirm: async (type) => {
+        if (connectMode.fromNoteId === targetData.id) {
+          return { errorMessage: "Não é permitido ligar a nota a ela mesma." };
         }
-        const type = normalized === "" ? "related" : normalized;
-        if (!RELATION_TYPES.includes(type)) {
-          bus.emit("output:append", `Tipo inválido. Use: ${choices}.`);
-          return;
+        const result = await createRelation({
+          fromId: connectMode.fromNoteId,
+          toId: targetData.id,
+          type,
+        });
+        if (result.ok) {
+          finishConnectMode();
+          return true;
         }
-        await createRelation({ fromId, toId, type });
-        connectMode = { active: false, fromNoteId: null, fromSubject: "" };
+        return { errorMessage: result.errorMessage };
       },
       onCancel: () => {
-        bus.emit("router:capture:stop");
-        bus.emit("input:placeholder", "");
         cancelConnectMode();
+      },
+    });
+  }
+
+  function addRelationEdge({ fromId, toId, type }) {
+    if (!cy) return;
+    const edgeId = `${fromId}-${toId}-${type}`;
+    if (cy.getElementById(edgeId).length > 0) return;
+    cy.add({
+      data: {
+        id: edgeId,
+        source: fromId,
+        target: toId,
+        type,
+        from_note_id: fromId,
+        to_note_id: toId,
       },
     });
   }
@@ -562,16 +670,25 @@ export function createGraphUI(bus, focusManager) {
   async function createRelation({ fromId, toId, type }) {
     const clientResponse = getSupabaseClient();
     if (clientResponse.error || !clientResponse.client) {
-      bus.emit("output:append", "Supabase não configurado. Use auth --register ou auth para autenticar.");
-      return;
+      return {
+        ok: false,
+        errorMessage: "Supabase não configurado. Use auth --register ou auth para autenticar.",
+      };
     }
 
     const user = await getAuthenticatedUser(clientResponse.client);
-    if (!user) return;
+    if (!user) {
+      return {
+        ok: false,
+        errorMessage: "Você precisa estar logado para usar este comando.",
+      };
+    }
 
     if (fromId === toId) {
-      bus.emit("output:append", "Não é permitido criar relação da nota com ela mesma.");
-      return;
+      return {
+        ok: false,
+        errorMessage: "Não é permitido criar relação da nota com ela mesma.",
+      };
     }
 
     const { data: existing, error: existingError } = await clientResponse.client
@@ -585,13 +702,14 @@ export function createGraphUI(bus, focusManager) {
       .maybeSingle();
 
     if (existingError) {
-      bus.emit("output:append", `Erro ao verificar relação na note_relations: ${existingError.message}`);
-      return;
+      return {
+        ok: false,
+        errorMessage: `Erro ao verificar relação na note_relations: ${existingError.message}`,
+      };
     }
 
     if (existing) {
-      bus.emit("output:append", "Essa relação já existe.");
-      return;
+      return { ok: false, errorMessage: "Essa relação já existe." };
     }
 
     const { error: insertError } = await clientResponse.client
@@ -605,15 +723,17 @@ export function createGraphUI(bus, focusManager) {
 
     if (insertError) {
       if (insertError.code === "23505") {
-        bus.emit("output:append", "Essa relação já existe.");
-        return;
+        return { ok: false, errorMessage: "Essa relação já existe." };
       }
-      bus.emit("output:append", `Erro ao criar relação na note_relations: ${insertError.message}`);
-      return;
+      return {
+        ok: false,
+        errorMessage: `Erro ao criar relação na note_relations: ${insertError.message}`,
+      };
     }
 
     bus.emit("output:append", `Relação criada: (${type}) ${fromId} -> ${toId}`);
-    bus.emit("graph:refresh");
+    addRelationEdge({ fromId, toId, type });
+    return { ok: true };
   }
 
   function startConfirmPrompt({ message, onConfirm }) {
@@ -643,16 +763,25 @@ export function createGraphUI(bus, focusManager) {
   function confirmDeleteNote(data) {
     if (!data?.id) return;
     clearDeleteBySubjectState();
-    startConfirmPrompt({
-      message: `Deletar nota "${data.subject ?? "(sem assunto)"}"? (y/n)`,
+    const subject = data.subject ?? "(sem assunto)";
+    const createdAt = data.created_at ? `Criada em ${data.created_at}` : "";
+    confirmModal.open({
+      title: "Deletar nota?",
+      message: subject,
+      detail: createdAt,
+      confirmLabel: "Sim, deletar",
+      cancelLabel: "Não",
+      danger: true,
       onConfirm: async () => {
         const clientResponse = getSupabaseClient();
         if (clientResponse.error || !clientResponse.client) {
-          bus.emit("output:append", "Supabase não configurado. Use auth --register ou auth para autenticar.");
-          return;
+          const message = "Supabase não configurado. Use auth --register ou auth para autenticar.";
+          confirmModal.setError(message);
+          bus.emit("output:append", message);
+          return false;
         }
         const user = await getAuthenticatedUser(clientResponse.client);
-        if (!user) return;
+        if (!user) return false;
         const { data: deleted, error } = await clientResponse.client
           .from("notes")
           .delete()
@@ -660,15 +789,24 @@ export function createGraphUI(bus, focusManager) {
           .eq("user_id", user.id)
           .select("id");
         if (error) {
-          bus.emit("output:append", `Erro ao deletar nota: ${error.message}`);
-          return;
+          confirmModal.setError(`Erro ao deletar nota: ${error.message}`);
+          return false;
         }
         if (!deleted || deleted.length === 0) {
-          bus.emit("output:append", "Nenhuma nota encontrada para deletar.");
-          return;
+          confirmModal.setError("Nenhuma nota encontrada para deletar.");
+          return false;
+        }
+        const node = cy?.getElementById(data.id);
+        if (node && node.length > 0) {
+          cy.remove(node.connectedEdges());
+          cy.remove(node);
+        }
+        if (detailId.textContent === data.id) {
+          clearDetails();
         }
         bus.emit("output:append", `Nota ${data.id} removida.`);
-        bus.emit("graph:refresh");
+        confirmModal.close();
+        return true;
       },
     });
   }
