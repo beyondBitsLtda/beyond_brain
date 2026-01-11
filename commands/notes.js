@@ -19,7 +19,6 @@ import {
 import { listRelationsForNote } from "./rels.js";
 import { createConfirmModal } from "../ui/confirmModal.js";
 import { createRelationModal } from "../ui/relationModal.js";
-import { ensureNoteIdeaColumns, getNoteIdeaColumnAvailability } from "../schemaUtils.js";
 const NOTE_FIELDS = [
   "id",
   "subject",
@@ -27,10 +26,6 @@ const NOTE_FIELDS = [
   "body",
   "ref",
   "created_at",
-  "is_idea",
-  "idea_level",
-  "idea_source",
-  "idea_marked_at",
 ];
 const UPDATE_FIELDS = ["subject", "moment", "body", "ref"];
 const TABLE_MAX_WIDTH = 40;
@@ -149,7 +144,7 @@ function formatNoteTable(notes) {
   const fields = ["idx", "subject", "created_at", "body"];
   const rows = notes.map((note, index) => ({
     idx: `#${index + 1}`,
-    subject: note.is_idea ? `★ ${note.subject ?? ""}` : note.subject ?? "",
+    subject: note.subject ?? "",
     created_at: formatDateTime(note.created_at ?? ""),
     body: normalizeSummary(note.body ?? ""),
   }));
@@ -248,85 +243,6 @@ async function createRelationFromList({ bus, fromId, toId, type }) {
   return { ok: true };
 }
 
-async function updateNoteIdea({ bus, noteId, isIdea, ideaLevel }) {
-  const { client, error } = getSupabaseClient();
-  if (error || !client) {
-    bus.emit("output:append", "Supabase não configurado. Use auth --register ou auth para autenticar.");
-    return { ok: false };
-  }
-
-  const user = await getAuthenticatedUser(bus, client);
-  if (!user) return { ok: false };
-
-  const hasIdeaColumns = await ensureNoteIdeaColumns({ client, userId: user.id, bus });
-  if (!hasIdeaColumns) {
-    bus.emit("output:append", "Não foi possível atualizar ideias sem as colunas de ideia.");
-    return { ok: false };
-  }
-
-  const { hasLevelSet } = getNoteIdeaColumnAvailability();
-  const updates = isIdea
-    ? {
-        is_idea: true,
-        idea_source: "manual",
-        idea_marked_at: new Date().toISOString(),
-      }
-    : {
-        is_idea: false,
-        idea_source: null,
-        idea_marked_at: null,
-      };
-
-  const { data, error: updateError } = await client
-    .from("notes")
-    .update(updates)
-    .eq("id", noteId)
-    .eq("user_id", user.id)
-    .select(
-      [
-        "id",
-        "is_idea",
-        "idea_level",
-        hasLevelSet ? "level_set" : null,
-        "subject",
-      ]
-        .filter(Boolean)
-        .join(",")
-    );
-
-  if (updateError) {
-    if (
-      updateError.status === 401 ||
-      updateError.status === 403 ||
-      updateError.code === "42501"
-    ) {
-      bus.emit("output:append", "Sem permissão para atualizar notes (UPDATE policy). Verifique RLS.");
-      return { ok: false };
-    }
-    bus.emit("output:append", `Erro ao atualizar ideia: ${updateError.message}`);
-    return { ok: false };
-  }
-  if (!data || data.length === 0) {
-    bus.emit("output:append", "Nenhuma nota encontrada para atualizar.");
-    return { ok: false };
-  }
-
-  bus.emit(
-    "output:append",
-    isIdea ? `Nota ${noteId} marcada como ideia.` : `Nota ${noteId} removida de ideias.`
-  );
-  bus.emit("graph:node:update", {
-    id: noteId,
-    is_idea: data[0]?.is_idea ?? isIdea,
-    idea_level: isIdea
-      ? data[0]?.idea_level ?? ideaLevel
-      : data[0]?.idea_level ?? null,
-    level_set: data[0]?.level_set,
-    subject: data[0]?.subject,
-  });
-  return { ok: true, note: data[0] };
-}
-
 function startRelationPickerFromNote(bus, note) {
   if (!note?.id) return;
   startRelationPicker({ fromNoteId: note.id, fromSubject: note.subject ?? "" });
@@ -421,26 +337,6 @@ function renderNotesOutput(bus, notes) {
               action: () => {
                 if (!note?.id) return;
                 listRelationsForNote(bus, note.id);
-              },
-            },
-            {
-              label: note?.is_idea ? "Remover Insight" : "Marcar como Insight",
-              action: async () => {
-                if (!note?.id) return;
-                const result = await updateNoteIdea({
-                  bus,
-                  noteId: note.id,
-                  isIdea: !note.is_idea,
-                  ideaLevel: note.idea_level ?? 1,
-                });
-                if (!result.ok) return;
-                const updatedList = getLastList().map((item) =>
-                  item.id === note.id
-                    ? { ...item, is_idea: !note.is_idea, idea_level: note.idea_level ?? 1 }
-                    : item
-                );
-                bus.emit("output:append", "Lista atualizada:");
-                renderNotesOutput(bus, updatedList);
               },
             },
             {
@@ -726,17 +622,8 @@ export function selectNoteCommand(bus, focusManager) {
     const user = await getAuthenticatedUser(bus, client);
     if (!user) return;
 
-    let requestedFields = resolveSelectFields(bus, parseSelectFields(raw));
+    const requestedFields = resolveSelectFields(bus, parseSelectFields(raw));
     if (!requestedFields) return;
-    const hasIdeaColumns = await ensureNoteIdeaColumns({ client, userId: user.id, bus });
-    if (!hasIdeaColumns) {
-      const ideaFields = ["is_idea", "idea_level", "idea_source", "idea_marked_at"];
-      const filtered = requestedFields.filter((field) => !ideaFields.includes(field));
-      if (filtered.length !== requestedFields.length) {
-        bus.emit("output:append", "Campos de ideia ignorados (colunas ausentes).");
-      }
-      requestedFields = filtered;
-    }
 
     const { conditions, error: whereError } = parseWhereClause(raw);
     if (whereError) {
@@ -758,7 +645,6 @@ export function selectNoteCommand(bus, focusManager) {
       "moment",
       "body",
       "created_at",
-      ...(hasIdeaColumns ? ["is_idea", "idea_level"] : []),
     ];
     const selectFields = Array.from(new Set([...requestedFields, ...baseFields]));
 

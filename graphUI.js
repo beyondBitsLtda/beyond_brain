@@ -8,19 +8,13 @@ import { createRelationModal } from "./ui/relationModal.js";
 import { createRelationWeightModal } from "./ui/relationWeightModal.js";
 import { clearDeleteBySubjectState } from "./state/deleteBySubjectState.js";
 import { listRelationsForNote } from "./commands/rels.js";
-import {
-  ensureNoteIdeaColumns,
-  ensureRelationWeightColumn,
-  getNoteIdeaColumnAvailability,
-} from "./schemaUtils.js";
+import { ensureRelationWeightColumn } from "./schemaUtils.js";
 
 const LABEL_LIMIT = 24;
 const DEPTH_MIN = 1;
 const DEPTH_MAX = 2;
 const WEIGHT_MIN = 1;
 const WEIGHT_MAX = 5;
-const IDEA_LEVEL_MIN = 1;
-const IDEA_LEVEL_MAX = 3;
 const DEBUG_GRAPH = true;
 
 const EDGE_WEIGHT_STYLES = {
@@ -31,10 +25,10 @@ const EDGE_WEIGHT_STYLES = {
   5: { width: 5, opacity: 1, glow: 14 },
 };
 
-function shortLabel(text = "") {
+function shortLabel(text = "", limit = LABEL_LIMIT) {
   const trimmed = text.trim();
-  if (trimmed.length <= LABEL_LIMIT) return trimmed;
-  return `${trimmed.slice(0, LABEL_LIMIT - 1)}…`;
+  if (trimmed.length <= limit) return trimmed;
+  return `${trimmed.slice(0, limit - 1)}…`;
 }
 
 function parseDepth(value) {
@@ -47,20 +41,6 @@ function parseDepth(value) {
 function clampWeight(value) {
   if (!Number.isFinite(value)) return WEIGHT_MIN;
   return Math.min(Math.max(value, WEIGHT_MIN), WEIGHT_MAX);
-}
-
-function clampIdeaLevel(value) {
-  if (!Number.isFinite(value)) return IDEA_LEVEL_MIN;
-  return Math.min(Math.max(value, IDEA_LEVEL_MIN), IDEA_LEVEL_MAX);
-}
-
-function buildDisplayLabel(note) {
-  const shortLabelValue = shortLabel(note.subject ?? "");
-  if (note.level_set === true) {
-    const level = clampIdeaLevel(Number(note.idea_level ?? 1));
-    return `${level} · ${shortLabelValue}`;
-  }
-  return shortLabelValue;
 }
 
 function debugLog(...args) {
@@ -96,32 +76,18 @@ function mapElements(notes, relations, allowedIds) {
   const nodes = notes
     .filter((note) => noteSet.has(note.id))
     .map((note) => {
-      const isIdea = Boolean(note.is_idea);
-      const levelSet = Boolean(note.level_set);
-      const ideaLevel = clampIdeaLevel(Number(note.idea_level ?? 1));
       const subject = note.subject ?? "";
       const nodeData = {
         id: note.id,
         subject,
         moment: note.moment ?? "",
         created_at: note.created_at ?? "",
-        is_idea: isIdea,
-        idea_level: ideaLevel,
-        level_set: levelSet,
         short_label: shortLabel(subject),
-        displayLabel: buildDisplayLabel({
-          subject,
-          level_set: levelSet,
-          idea_level: ideaLevel,
-        }),
       };
       debugLog("nodeData", {
         id: nodeData.id,
         subject: nodeData.subject,
-        is_idea: nodeData.is_idea,
-        idea_level: nodeData.idea_level,
-        level_set: nodeData.level_set,
-        displayLabel: nodeData.displayLabel,
+        short_label: nodeData.short_label,
       });
       return { data: nodeData };
     });
@@ -205,17 +171,9 @@ export function createGraphUI(bus, focusManager) {
       nodeBg: styles.getPropertyValue("--node-bg").trim(),
       nodeFg: styles.getPropertyValue("--node-fg").trim(),
       nodeBorder: styles.getPropertyValue("--node-border").trim(),
-      insightNodeBg: styles.getPropertyValue("--insight-node-bg").trim(),
-      insightNodeFg: styles.getPropertyValue("--insight-node-fg").trim(),
-      insightNodeBorder: styles.getPropertyValue("--insight-node-border").trim(),
-      levelBadgeBg: styles.getPropertyValue("--level-badge-bg").trim(),
-      levelBadgeFg: styles.getPropertyValue("--level-badge-fg").trim(),
       edgeColor: styles.getPropertyValue("--edge-color").trim(),
       edgeStrongColor: styles.getPropertyValue("--edge-strong-color").trim(),
       edgeGlowColor: styles.getPropertyValue("--edge-glow-color").trim(),
-      ideaBorderColor: styles.getPropertyValue("--idea-border-color").trim(),
-      ideaGlowColor: styles.getPropertyValue("--idea-glow-color").trim(),
-      ideaBadgeColor: styles.getPropertyValue("--idea-badge-color").trim(),
     };
   }
 
@@ -310,16 +268,10 @@ export function createGraphUI(bus, focusManager) {
       nodeBg,
       nodeFg,
       nodeBorder,
-      insightNodeBg,
-      insightNodeFg,
-      insightNodeBorder,
-      levelBadgeBg,
-      levelBadgeFg,
       accent,
       edgeColor,
       edgeStrongColor,
       edgeGlowColor,
-      ideaGlowColor,
     } = tokens;
 
     const edgeBase = getEdgeStyle({ edgeColor, edgeStrongColor, edgeGlowColor });
@@ -347,44 +299,23 @@ export function createGraphUI(bus, focusManager) {
       }
     );
 
-    debugLog("styles: insight selector node[is_idea = true], level selector node[level_set = true]");
-
-    return [
+    const styles = [
       {
         selector: "node",
         style: {
           "background-color": nodeBg,
           "border-color": nodeBorder,
-          "border-width": 1,
+          "border-width": 2,
           color: nodeFg,
-          label: "data(displayLabel)",
+          label: "data(short_label)",
           "font-size": 10,
           "text-wrap": "wrap",
-          "text-max-width": 80,
+          "text-max-width": 120,
         },
       },
       {
         selector: "edge",
         style: edgeBase,
-      },
-      {
-        selector: "node[is_idea = true]",
-        style: {
-          "background-color": insightNodeBg,
-          color: insightNodeFg,
-          "border-color": insightNodeBorder || nodeBorder,
-          "border-width": 2,
-          "shadow-color": ideaGlowColor,
-          "shadow-opacity": 0.5,
-        },
-      },
-      {
-        selector: "node[level_set = true]",
-        style: {
-          "text-outline-color": levelBadgeBg,
-          "text-outline-width": 2,
-          color: levelBadgeFg || nodeFg,
-        },
       },
       {
         selector: "node:selected",
@@ -405,6 +336,8 @@ export function createGraphUI(bus, focusManager) {
       },
       ...edgeWeightSelectors,
     ];
+
+    return styles;
   }
 
   function applyGraphTheme() {
@@ -492,8 +425,6 @@ export function createGraphUI(bus, focusManager) {
         handleConnectTarget(data);
         return;
       }
-      const isIdea = Boolean(data.is_idea);
-      const levelSet = Boolean(data.level_set);
       openActionPopoverAtEvent(
         `node:${data.id}`,
         event,
@@ -515,41 +446,6 @@ export function createGraphUI(bus, focusManager) {
             label: "Consultar relações",
             action: () => {
               listRelationsForNote(bus, data.id);
-            },
-          },
-          {
-            label: isIdea ? "Remover Insight" : "Marcar como Insight",
-            action: () => {
-              updateNoteIdeaStatus({
-                noteId: data.id,
-                isIdea: !isIdea,
-              });
-            },
-          },
-          {
-            label: "Definir nível (1..3)",
-            action: () => {
-              openActionPopoverAtEvent(
-                `node:${data.id}:idea-level`,
-                event,
-                [1, 2, 3].map((level) => ({
-                  label: `Nível ${level}`,
-                  action: () => {
-                    updateNoteLevelStatus({ noteId: data.id, level });
-                  },
-                })),
-                "Nível da ideia"
-              );
-            },
-          },
-          {
-            label: "Remover nível",
-            action: () => {
-              if (!levelSet) {
-                bus.emit("output:append", "Este nodo não possui nível definido.");
-                return;
-              }
-              clearNoteLevelStatus({ noteId: data.id });
             },
           },
           {
@@ -627,15 +523,6 @@ export function createGraphUI(bus, focusManager) {
     return data.user;
   }
 
-  function reportUpdatePermissionError(error) {
-    if (!error) return false;
-    if (error.status === 401 || error.status === 403 || error.code === "42501") {
-      bus.emit("output:append", "Sem permissão para atualizar notes (UPDATE policy). Verifique RLS.");
-      return true;
-    }
-    return false;
-  }
-
   async function ensureRelationIdColumn(client, userId) {
     if (relationIdColumnAvailable !== null) {
       return relationIdColumnAvailable;
@@ -691,7 +578,7 @@ export function createGraphUI(bus, focusManager) {
     const user = await getAuthenticatedUser(clientResponse.client);
     if (!user) return;
 
-    const [hasRelationId, hasRelationCreatedAt, hasRelationWeight, hasNoteIdea] =
+    const [hasRelationId, hasRelationCreatedAt, hasRelationWeight] =
       await Promise.all([
         ensureRelationIdColumn(clientResponse.client, user.id),
         ensureRelationCreatedAtColumn(clientResponse.client, user.id),
@@ -700,9 +587,7 @@ export function createGraphUI(bus, focusManager) {
           userId: user.id,
           bus,
         }),
-        ensureNoteIdeaColumns({ client: clientResponse.client, userId: user.id, bus }),
       ]);
-    const { hasLevelSet } = getNoteIdeaColumnAvailability();
     const relationSelectFields = [
       hasRelationId ? "id" : null,
       "from_note_id",
@@ -713,18 +598,7 @@ export function createGraphUI(bus, focusManager) {
     ]
       .filter(Boolean)
       .join(",");
-    const noteSelectFields = [
-      "id",
-      "subject",
-      "moment",
-      "created_at",
-      "body",
-      hasNoteIdea ? "is_idea" : null,
-      hasNoteIdea ? "idea_level" : null,
-      hasNoteIdea && hasLevelSet ? "level_set" : null,
-    ]
-      .filter(Boolean)
-      .join(",");
+    const noteSelectFields = "id,subject,created_at,moment,body";
     debugLog("notes select fields", noteSelectFields);
 
     const [notesResponse, relsResponse] = await Promise.all([
@@ -750,14 +624,19 @@ export function createGraphUI(bus, focusManager) {
 
     const notes = notesResponse.data ?? [];
     const relations = relsResponse.data ?? [];
+    if (DEBUG_GRAPH) {
+      console.table(
+        notes.slice(0, 10).map((note) => ({
+          id: note.id,
+          subject: note.subject,
+        }))
+      );
+    }
     if (notes.length > 0) {
       const sample = notes[0];
       debugLog("notes sample", {
         id: sample.id,
         subject: sample.subject,
-        is_idea: sample.is_idea,
-        idea_level: sample.idea_level,
-        level_set: sample.level_set,
       });
     }
     noteBodies = new Map(notes.map((note) => [note.id, note.body ?? ""]));
@@ -834,20 +713,6 @@ export function createGraphUI(bus, focusManager) {
     if (!isOpen) return;
     loadGraph({ focusNoteId: focusManager?.getFocusNoteId?.() ?? null });
   });
-
-  bus.on("graph:node:update", (payload = {}) => {
-    if (!isOpen || !cy) return;
-    const { id, is_idea, idea_level, level_set, subject } = payload;
-    if (!id) return;
-    debugLog("graph:node:update payload", payload);
-    refreshGraphNode(id, {
-      is_idea,
-      idea_level,
-      level_set,
-      subject,
-    });
-  });
-
   bus.on("connect:start", ({ fromNoteId, fromSubject } = {}) => {
     if (!fromNoteId) return;
     if (!isOpen) {
@@ -1064,257 +929,6 @@ export function createGraphUI(bus, focusManager) {
       { from_note_id: fromId, to_note_id: toId, type, weight: WEIGHT_MIN },
     ];
     return { ok: true };
-  }
-
-  function updateNodeIdeaState({ noteId, isIdea, ideaLevel, levelSet, subject }) {
-    if (!cy || !noteId) return;
-    const node = cy.getElementById(noteId);
-    if (!node || node.length === 0) return;
-    const level = clampIdeaLevel(Number(ideaLevel ?? 1));
-    const levelIsSet = Boolean(levelSet);
-    const nextSubject = subject ?? node.data("subject") ?? "";
-    const shortLabelValue = shortLabel(nextSubject);
-
-    node.data("subject", nextSubject);
-    node.data("is_idea", isIdea);
-    node.data("idea_level", level);
-    node.data("level_set", levelIsSet);
-    node.data("short_label", shortLabelValue);
-    node.data("displayLabel", buildDisplayLabel({
-      subject: nextSubject,
-      level_set: levelIsSet,
-      idea_level: level,
-    }));
-    cy.style().update();
-  }
-
-  async function refreshGraphNode(noteId, fallback = {}) {
-    if (!cy || !noteId) return;
-    const clientResponse = getSupabaseClient();
-    if (clientResponse.error || !clientResponse.client) {
-      updateNodeIdeaState({
-        noteId,
-        isIdea: Boolean(fallback.is_idea),
-        ideaLevel: fallback.idea_level,
-        levelSet: fallback.level_set,
-        subject: fallback.subject,
-      });
-      return;
-    }
-
-    const user = await getAuthenticatedUser(clientResponse.client);
-    if (!user) return;
-
-    const hasIdeaColumns = await ensureNoteIdeaColumns({
-      client: clientResponse.client,
-      userId: user.id,
-      bus,
-    });
-    if (!hasIdeaColumns) return;
-
-    const { hasLevelSet } = getNoteIdeaColumnAvailability();
-    const selectFields = [
-      "id",
-      "subject",
-      "is_idea",
-      "idea_level",
-      hasLevelSet ? "level_set" : null,
-    ]
-      .filter(Boolean)
-      .join(",");
-    const { data, error } = await clientResponse.client
-      .from("notes")
-      .select(selectFields)
-      .eq("id", noteId)
-      .eq("user_id", user.id)
-      .maybeSingle();
-
-    if (error) {
-      debugLog("refreshGraphNode error", error);
-      updateNodeIdeaState({
-        noteId,
-        isIdea: Boolean(fallback.is_idea),
-        ideaLevel: fallback.idea_level,
-        levelSet: fallback.level_set,
-        subject: fallback.subject,
-      });
-      return;
-    }
-
-    debugLog("refreshGraphNode data", data);
-    updateNodeIdeaState({
-      noteId,
-      isIdea: Boolean(data?.is_idea ?? fallback.is_idea),
-      ideaLevel: data?.idea_level ?? fallback.idea_level,
-      levelSet: data?.level_set ?? fallback.level_set,
-      subject: data?.subject ?? fallback.subject,
-    });
-  }
-
-  async function updateNoteIdeaStatus({ noteId, isIdea }) {
-    if (!noteId) return;
-    const clientResponse = getSupabaseClient();
-    if (clientResponse.error || !clientResponse.client) {
-      bus.emit("output:append", "Supabase não configurado. Use auth --register ou auth para autenticar.");
-      return;
-    }
-
-    const user = await getAuthenticatedUser(clientResponse.client);
-    if (!user) return;
-
-    const hasIdeaColumns = await ensureNoteIdeaColumns({
-      client: clientResponse.client,
-      userId: user.id,
-      bus,
-    });
-    if (!hasIdeaColumns) {
-      bus.emit("output:append", "Não foi possível atualizar ideias sem as colunas de ideia.");
-      return;
-    }
-
-    const { hasLevelSet } = getNoteIdeaColumnAvailability();
-    const updates = isIdea
-      ? {
-          is_idea: true,
-          idea_source: "manual",
-          idea_marked_at: new Date().toISOString(),
-        }
-      : {
-          is_idea: false,
-          idea_source: null,
-          idea_marked_at: null,
-        };
-
-    const selectFields = [
-      "id",
-      "is_idea",
-      "idea_level",
-      hasLevelSet ? "level_set" : null,
-      "subject",
-    ]
-      .filter(Boolean)
-      .join(",");
-    const { data, error } = await clientResponse.client
-      .from("notes")
-      .update(updates)
-      .eq("id", noteId)
-      .eq("user_id", user.id)
-      .select(selectFields);
-
-    if (error) {
-      if (reportUpdatePermissionError(error)) return;
-      bus.emit("output:append", `Erro ao atualizar ideia: ${error.message}`);
-      return;
-    }
-
-    if (!data || data.length === 0) {
-      bus.emit("output:append", "Nenhuma nota encontrada para atualizar.");
-      return;
-    }
-
-    bus.emit(
-      "output:append",
-      isIdea ? `Nota ${noteId} marcada como ideia.` : `Nota ${noteId} removida de ideias.`
-    );
-    debugLog("updateNoteIdeaStatus response", data?.[0]);
-    await refreshGraphNode(noteId, data?.[0] ?? { is_idea: isIdea });
-  }
-
-  async function updateNoteLevelStatus({ noteId, level }) {
-    if (!noteId) return;
-    const clientResponse = getSupabaseClient();
-    if (clientResponse.error || !clientResponse.client) {
-      bus.emit("output:append", "Supabase não configurado. Use auth --register ou auth para autenticar.");
-      return;
-    }
-
-    const user = await getAuthenticatedUser(clientResponse.client);
-    if (!user) return;
-
-    const hasIdeaColumns = await ensureNoteIdeaColumns({
-      client: clientResponse.client,
-      userId: user.id,
-      bus,
-    });
-    if (!hasIdeaColumns) {
-      bus.emit("output:append", "Não foi possível atualizar níveis sem as colunas de ideia.");
-      return;
-    }
-    const { hasLevelSet } = getNoteIdeaColumnAvailability();
-    if (!hasLevelSet) {
-      bus.emit("output:append", "Não foi possível atualizar níveis sem a coluna level_set.");
-      return;
-    }
-
-    const normalizedLevel = clampIdeaLevel(Number(level ?? 1));
-    const { data, error } = await clientResponse.client
-      .from("notes")
-      .update({ idea_level: normalizedLevel, level_set: true })
-      .eq("id", noteId)
-      .eq("user_id", user.id)
-      .select("id,is_idea,idea_level,level_set,subject");
-
-    if (error) {
-      if (reportUpdatePermissionError(error)) return;
-      bus.emit("output:append", `Erro ao atualizar nível: ${error.message}`);
-      return;
-    }
-    if (!data || data.length === 0) {
-      bus.emit("output:append", "Nenhuma nota encontrada para atualizar.");
-      return;
-    }
-
-    bus.emit("output:append", `Nível definido como ${normalizedLevel}.`);
-    debugLog("updateNoteLevelStatus response", data?.[0]);
-    await refreshGraphNode(noteId, data?.[0] ?? { idea_level: normalizedLevel, level_set: true });
-  }
-
-  async function clearNoteLevelStatus({ noteId }) {
-    if (!noteId) return;
-    const clientResponse = getSupabaseClient();
-    if (clientResponse.error || !clientResponse.client) {
-      bus.emit("output:append", "Supabase não configurado. Use auth --register ou auth para autenticar.");
-      return;
-    }
-
-    const user = await getAuthenticatedUser(clientResponse.client);
-    if (!user) return;
-
-    const hasIdeaColumns = await ensureNoteIdeaColumns({
-      client: clientResponse.client,
-      userId: user.id,
-      bus,
-    });
-    if (!hasIdeaColumns) {
-      bus.emit("output:append", "Não foi possível remover nível sem as colunas de ideia.");
-      return;
-    }
-    const { hasLevelSet } = getNoteIdeaColumnAvailability();
-    if (!hasLevelSet) {
-      bus.emit("output:append", "Não foi possível remover nível sem a coluna level_set.");
-      return;
-    }
-
-    const { data, error } = await clientResponse.client
-      .from("notes")
-      .update({ level_set: false })
-      .eq("id", noteId)
-      .eq("user_id", user.id)
-      .select("id,is_idea,idea_level,level_set,subject");
-
-    if (error) {
-      if (reportUpdatePermissionError(error)) return;
-      bus.emit("output:append", `Erro ao remover nível: ${error.message}`);
-      return;
-    }
-    if (!data || data.length === 0) {
-      bus.emit("output:append", "Nenhuma nota encontrada para atualizar.");
-      return;
-    }
-
-    bus.emit("output:append", "Nível removido.");
-    debugLog("clearNoteLevelStatus response", data?.[0]);
-    await refreshGraphNode(noteId, data?.[0] ?? { level_set: false });
   }
 
   function updateRelationCacheWeight(relData, weight) {
