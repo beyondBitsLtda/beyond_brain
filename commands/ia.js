@@ -28,6 +28,13 @@ import {
   getSeminarState,
   setSeminarState,
 } from "../ai/seminarState.js";
+import { clearIdeaState, getIdeaState, setIdeaState } from "../ai/ideaState.js";
+import { clearWeightState, getWeightState, setWeightState } from "../ai/weightState.js";
+import {
+  ensureNoteIdeaColumns,
+  ensureRelationConfidenceColumn,
+  ensureRelationWeightColumn,
+} from "../schemaUtils.js";
 
 const MIN_KEY_LENGTH = 20;
 const MAX_OUTPUT_LENGTH = 1200;
@@ -39,6 +46,15 @@ const PAIR_BRAIN_MAX_COUNT = 20;
 const PAIR_BRAIN_DEFAULT_COUNT = 3;
 const NOTE_FIELDS = ["id", "subject", "moment", "body", "created_at"];
 const SEMINAR_ALLOWED_SELECTION = /^[0-9,\s]+$/;
+const IDEA_SUGGEST_LIMIT = 5;
+const WEIGHT_SUGGEST_LIMIT = 20;
+
+function mapConfidenceToWeight(confidence) {
+  if (confidence >= 0.9) return 4;
+  if (confidence >= 0.85) return 3;
+  if (confidence >= 0.8) return 2;
+  return null;
+}
 
 function emitPrompt(bus, label, { masked = false, placeholder = "" } = {}) {
   bus.emit("output:append", label);
@@ -218,6 +234,179 @@ function buildSuggestLinksPrompt(notes) {
   ].join("\n");
 }
 
+function truncateBody(body, maxLength = 180) {
+  if (!body) return "";
+  const trimmed = body.replace(/\s+/g, " ").trim();
+  if (trimmed.length <= maxLength) return trimmed;
+  return `${trimmed.slice(0, maxLength - 3)}...`;
+}
+
+function buildIdeasPrompt(notes) {
+  const list = notes
+    .map((note) => {
+      const shortBody = truncateBody(note.body ?? "", 180);
+      return `- id=${note.id} | subject=${note.subject ?? ""} | body=${shortBody}`;
+    })
+    .join("\n");
+
+  return [
+    "Você é um assistente que identifica nodos-ideia.",
+    "Sugira até 5 notas para marcar como ideia.",
+    "Atribua level 1..3 e reason curto.",
+    "Responda apenas com JSON válido no formato:",
+    `{\"ideas\":[{\"note_id\":\"uuid\",\"level\":2,\"reason\":\"texto curto\"}]}`,
+    "",
+    "Notas:",
+    list,
+  ].join("\n");
+}
+
+function buildIdeasRetryPrompt(notes) {
+  const list = notes
+    .map((note) => {
+      const shortBody = truncateBody(note.body ?? "", 180);
+      return `- id=${note.id} | subject=${note.subject ?? ""} | body=${shortBody}`;
+    })
+    .join("\n");
+
+  return [
+    "Retorne apenas JSON válido no formato abaixo. Nada além de JSON.",
+    `{\"ideas\":[{\"note_id\":\"uuid\",\"level\":2,\"reason\":\"texto curto\"}]}`,
+    "",
+    "Notas:",
+    list,
+  ].join("\n");
+}
+
+function parseIdeasJson(raw) {
+  try {
+    const payload = JSON.parse(raw);
+    if (!payload || !Array.isArray(payload.ideas)) {
+      return { ok: false, error: "Formato JSON inválido." };
+    }
+    return { ok: true, payload };
+  } catch (error) {
+    return { ok: false, error: "JSON inválido." };
+  }
+}
+
+function normalizeIdeaSuggestions(rawIdeas, notesById) {
+  if (!Array.isArray(rawIdeas)) return [];
+  return rawIdeas
+    .map((idea) => {
+      if (!idea || typeof idea !== "object") return null;
+      const noteId = String(idea.note_id ?? "").trim();
+      const level = Number(idea.level);
+      const reason = String(idea.reason ?? "").trim();
+      if (!noteId || !notesById.has(noteId)) return null;
+      if (!Number.isFinite(level)) return null;
+      return {
+        noteId,
+        level: Math.min(Math.max(Math.round(level), 1), 3),
+        reason,
+        subject: notesById.get(noteId)?.subject ?? "",
+      };
+    })
+    .filter(Boolean)
+    .slice(0, IDEA_SUGGEST_LIMIT);
+}
+
+function buildWeightsPrompt(notes, relations) {
+  const noteList = notes
+    .map((note) => {
+      const shortBody = truncateBody(note.body ?? "", 160);
+      return `- id=${note.id} | subject=${note.subject ?? ""} | body=${shortBody}`;
+    })
+    .join("\n");
+  const relList = relations
+    .map((rel) => {
+      const weight = rel.weight ?? 1;
+      return `- from=${rel.from_note_id} | to=${rel.to_note_id} | type=${rel.type ?? "related"} | weight=${weight}`;
+    })
+    .join("\n");
+
+  return [
+    "Você é um assistente que ajusta o peso de relações.",
+    "Sugira pesos 1..5 para relações existentes.",
+    "Use reason curto em pt-BR.",
+    "Responda apenas com JSON válido no formato:",
+    `{\"weights\":[{\"from_id\":\"uuid\",\"to_id\":\"uuid\",\"type\":\"related\",\"weight\":3,\"reason\":\"texto curto\"}]}`,
+    "",
+    "Notas:",
+    noteList,
+    "",
+    "Relações:",
+    relList,
+  ].join("\n");
+}
+
+function buildWeightsRetryPrompt(notes, relations) {
+  const noteList = notes
+    .map((note) => {
+      const shortBody = truncateBody(note.body ?? "", 160);
+      return `- id=${note.id} | subject=${note.subject ?? ""} | body=${shortBody}`;
+    })
+    .join("\n");
+  const relList = relations
+    .map((rel) => {
+      const weight = rel.weight ?? 1;
+      return `- from=${rel.from_note_id} | to=${rel.to_note_id} | type=${rel.type ?? "related"} | weight=${weight}`;
+    })
+    .join("\n");
+
+  return [
+    "Retorne apenas JSON válido no formato abaixo. Nada além de JSON.",
+    `{\"weights\":[{\"from_id\":\"uuid\",\"to_id\":\"uuid\",\"type\":\"related\",\"weight\":3,\"reason\":\"texto curto\"}]}`,
+    "",
+    "Notas:",
+    noteList,
+    "",
+    "Relações:",
+    relList,
+  ].join("\n");
+}
+
+function parseWeightsJson(raw) {
+  try {
+    const payload = JSON.parse(raw);
+    if (!payload || !Array.isArray(payload.weights)) {
+      return { ok: false, error: "Formato JSON inválido." };
+    }
+    return { ok: true, payload };
+  } catch (error) {
+    return { ok: false, error: "JSON inválido." };
+  }
+}
+
+function normalizeWeightSuggestions(rawWeights, relations) {
+  if (!Array.isArray(rawWeights)) return [];
+  const relationKeys = new Set(
+    relations.map((rel) => `${rel.from_note_id}|${rel.to_note_id}|${rel.type ?? "related"}`)
+  );
+  return rawWeights
+    .map((item) => {
+      if (!item || typeof item !== "object") return null;
+      const fromId = String(item.from_id ?? "").trim();
+      const toId = String(item.to_id ?? "").trim();
+      const type = String(item.type ?? "related").trim();
+      const weight = Number(item.weight);
+      const reason = String(item.reason ?? "").trim();
+      if (!fromId || !toId || !type) return null;
+      const key = `${fromId}|${toId}|${type}`;
+      if (!relationKeys.has(key)) return null;
+      if (!Number.isFinite(weight)) return null;
+      return {
+        fromId,
+        toId,
+        type,
+        weight: Math.min(Math.max(Math.round(weight), 1), 5),
+        reason,
+      };
+    })
+    .filter(Boolean)
+    .slice(0, WEIGHT_SUGGEST_LIMIT);
+}
+
 function formatSeminarScope(scope) {
   if (!scope) return "n/a";
   if (scope.type === "today") return "today (24h)";
@@ -286,6 +475,94 @@ function parseSeminarCommand(raw) {
   return {
     error:
       "Uso: IA seminar | IA seminar last N | IA seminar today | IA seminar week | IA seminar status | IA seminar apply all | IA seminar apply 1,3 | IA seminar discard",
+  };
+}
+
+function parseIdeasCommand(raw) {
+  const match = raw.trim().match(/^ia\s+ideas(?:\s+(.+))?$/i);
+  if (!match) return null;
+  const args = (match[1] ?? "").trim();
+  if (!args || args === "today") {
+    return { action: "preview", scope: { type: "today" } };
+  }
+
+  const normalized = args.toLowerCase();
+  if (normalized === "discard") {
+    return { action: "discard" };
+  }
+
+  const applyMatch = normalized.match(/^apply\s+(.+)$/);
+  if (applyMatch) {
+    const selection = applyMatch[1].trim();
+    if (selection === "all") {
+      return { action: "apply", selection: "all" };
+    }
+    if (!SEMINAR_ALLOWED_SELECTION.test(selection)) {
+      return { error: "Seleção inválida. Use: IA ideas apply all | 1,3,5" };
+    }
+    const indices = selection
+      .split(",")
+      .map((value) => Number.parseInt(value.trim(), 10))
+      .filter((value) => Number.isFinite(value));
+    if (!indices.length) {
+      return { error: "Seleção inválida. Use: IA ideas apply all | 1,3,5" };
+    }
+    return { action: "apply", selection: indices };
+  }
+
+  return {
+    error: "Uso: IA ideas today | IA ideas apply all | IA ideas apply 1,3 | IA ideas discard",
+  };
+}
+
+function parseWeightsCommand(raw) {
+  const match = raw.trim().match(/^ia\s+weights(?:\s+(.+))?$/i);
+  if (!match) return null;
+  const args = (match[1] ?? "").trim();
+  if (!args || args === "today") {
+    return { action: "preview", scope: { type: "today" } };
+  }
+
+  const normalized = args.toLowerCase();
+  if (normalized === "discard") {
+    return { action: "discard" };
+  }
+
+  const lastMatch = normalized.match(/^last\s+(\d+)$/);
+  if (lastMatch) {
+    const count = Number.parseInt(lastMatch[1], 10);
+    if (
+      Number.isNaN(count) ||
+      count < SEMINAR_LIMITS.MIN_LAST_COUNT ||
+      count > SEMINAR_LIMITS.MAX_LAST_COUNT
+    ) {
+      return { error: "Uso: IA weights last N (N entre 5 e 50)." };
+    }
+    return { action: "preview", scope: { type: "last", count } };
+  }
+
+  const applyMatch = normalized.match(/^apply\s+(.+)$/);
+  if (applyMatch) {
+    const selection = applyMatch[1].trim();
+    if (selection === "all") {
+      return { action: "apply", selection: "all" };
+    }
+    if (!SEMINAR_ALLOWED_SELECTION.test(selection)) {
+      return { error: "Seleção inválida. Use: IA weights apply all | 1,3,5" };
+    }
+    const indices = selection
+      .split(",")
+      .map((value) => Number.parseInt(value.trim(), 10))
+      .filter((value) => Number.isFinite(value));
+    if (!indices.length) {
+      return { error: "Seleção inválida. Use: IA weights apply all | 1,3,5" };
+    }
+    return { action: "apply", selection: indices };
+  }
+
+  return {
+    error:
+      "Uso: IA weights today | IA weights last N | IA weights apply all | IA weights apply 1,3 | IA weights discard",
   };
 }
 
@@ -715,6 +992,10 @@ export function iaCommand(bus) {
           '- IA title note id="uuid": sugere 3 titles para a nota',
           "- IA seminar: sugere links em modo semiautomático (preview)",
           "- IA seminar last N | today | week | status | apply | discard",
+          "- IA ideas today: sugere notas-ideia (preview)",
+          "- IA ideas apply all | apply 1,3 | discard",
+          "- IA weights today | last N: sugere pesos (preview)",
+          "- IA weights apply all | apply 1,3 | discard",
         ].join("\n")
       );
       return;
@@ -818,6 +1099,417 @@ export function iaCommand(bus) {
 
       await showPairBrainQuestion(bus, apiKey, client, user.id);
       return;
+    }
+
+    if (normalized.startsWith("ia ideas")) {
+      const parsed = parseIdeasCommand(trimmed);
+      if (parsed?.error) {
+        bus.emit("output:append", parsed.error);
+        return;
+      }
+
+      if (parsed?.action === "discard") {
+        const state = getIdeaState();
+        if (!state.suggestions?.length) {
+          bus.emit("output:append", "IA ideas: nenhum preview pendente.");
+          return;
+        }
+        clearIdeaState();
+        bus.emit("output:append", "IA ideas: preview descartado.");
+        return;
+      }
+
+      const { client, error } = getSupabaseClient();
+      if (error || !client) {
+        bus.emit(
+          "output:append",
+          "Supabase não configurado. Use auth --register ou auth para autenticar."
+        );
+        return;
+      }
+
+      const user = await getAuthenticatedUser(bus, client);
+      if (!user) return;
+
+      if (parsed?.action === "apply") {
+        const state = getIdeaState();
+        if (!state.suggestions?.length) {
+          bus.emit("output:append", "IA ideas: nenhum preview pendente.");
+          return;
+        }
+
+        const selection = parseSelection(parsed.selection, state.suggestions.length);
+        if (!selection) {
+          bus.emit("output:append", "Seleção inválida. Use: IA ideas apply all | 1,3,5");
+          return;
+        }
+
+        const pendingSelection = selection.filter(
+          (index) => !state.appliedIds?.includes(index)
+        );
+        if (!pendingSelection.length) {
+          bus.emit("output:append", "IA ideas: itens selecionados já aplicados.");
+          return;
+        }
+
+        const hasIdeaColumns = await ensureNoteIdeaColumns({ client, userId: user.id, bus });
+        if (!hasIdeaColumns) {
+          bus.emit("output:append", "Não foi possível aplicar ideias sem colunas de ideia.");
+          return;
+        }
+
+        const pendingSuggestions = pendingSelection.map(
+          (index) => state.suggestions[index - 1]
+        );
+        const noteIds = pendingSuggestions.map((suggestion) => suggestion.noteId);
+        const ownership = await ensureOwnedNotes(client, user.id, noteIds);
+        if (ownership.error) {
+          bus.emit(
+            "output:append",
+            `Erro ao validar notas: ${ownership.error.message}`
+          );
+          return;
+        }
+
+        const missingNoteIds = new Set(ownership.missing ?? []);
+        let applied = [...(state.appliedIds ?? [])];
+        let updated = 0;
+        let skipped = 0;
+        let failed = 0;
+
+        for (const selectionIndex of pendingSelection) {
+          const suggestion = state.suggestions[selectionIndex - 1];
+          if (!suggestion || missingNoteIds.has(suggestion.noteId)) {
+            skipped += 1;
+            applied.push(selectionIndex);
+            continue;
+          }
+
+          const { error: updateError } = await client
+            .from("notes")
+            .update({
+              is_idea: true,
+              idea_level: suggestion.level,
+              idea_source: "ia",
+              idea_marked_at: new Date().toISOString(),
+            })
+            .eq("id", suggestion.noteId)
+            .eq("user_id", user.id);
+
+          if (updateError) {
+            failed += 1;
+            bus.emit(
+              "output:append",
+              `Erro ao aplicar ideia [${selectionIndex}]: ${updateError.message}`
+            );
+            continue;
+          }
+
+          updated += 1;
+          applied.push(selectionIndex);
+        }
+
+        setIdeaState({ ...state, appliedIds: applied });
+        bus.emit(
+          "output:append",
+          `IA ideas — aplicado: ${updated}, ignorados: ${skipped}, erros: ${failed}.`
+        );
+        if (updated > 0) {
+          bus.emit("graph:refresh");
+        }
+        return;
+      }
+
+      if (parsed?.action === "preview") {
+        const apiKey = ensureGeminiKey(bus);
+        if (!apiKey) return;
+
+        const { notes, error: notesError } = await fetchNotes({
+          client,
+          userId: user.id,
+          scope: parsed.scope,
+        });
+
+        if (notesError) {
+          bus.emit("output:append", `Erro ao buscar notas: ${notesError.message}`);
+          return;
+        }
+
+        if (!notes || notes.length === 0) {
+          bus.emit("output:append", "IA ideas: nenhuma nota encontrada.");
+          return;
+        }
+
+        let rawIdeas = [];
+        try {
+          const prompt = buildIdeasPrompt(notes);
+          const firstRaw = await generateText(prompt, apiKey);
+          const parsedIdeas = parseIdeasJson(firstRaw);
+          if (parsedIdeas.ok) {
+            rawIdeas = parsedIdeas.payload.ideas ?? [];
+          } else {
+            const retryPrompt = buildIdeasRetryPrompt(notes);
+            const retryRaw = await generateText(retryPrompt, apiKey);
+            const retryParsed = parseIdeasJson(retryRaw);
+            if (!retryParsed.ok) {
+              throw new Error("Resposta inválida do Gemini. JSON inválido.");
+            }
+            rawIdeas = retryParsed.payload.ideas ?? [];
+          }
+        } catch (error) {
+          bus.emit("output:append", `ERR: ${error?.message ?? "Falha ao gerar ideias."}`);
+          return;
+        }
+
+        const notesById = new Map(notes.map((note) => [note.id, note]));
+        const suggestions = normalizeIdeaSuggestions(rawIdeas, notesById);
+
+        setIdeaState({
+          lastGeneratedAt: new Date().toISOString(),
+          scope: parsed.scope,
+          noteCount: notes.length,
+          suggestions,
+          appliedIds: [],
+        });
+
+        if (!suggestions.length) {
+          bus.emit("output:append", "IA ideas: nenhuma sugestão encontrada.");
+          return;
+        }
+
+        bus.emit("output:append", "IA ideas — sugestões encontradas (preview):");
+        suggestions.forEach((suggestion, index) => {
+          bus.emit(
+            "output:append",
+            `[${index + 1}] "${suggestion.subject}" (nível ${suggestion.level})`
+          );
+          bus.emit("output:append", `    motivo: ${suggestion.reason || "sem motivo"}`);
+        });
+        bus.emit("output:append", "");
+        bus.emit("output:append", "- `IA ideas apply all`");
+        bus.emit("output:append", "- `IA ideas apply 1,2`");
+        bus.emit("output:append", "- `IA ideas discard`");
+        return;
+      }
+    }
+
+    if (normalized.startsWith("ia weights")) {
+      const parsed = parseWeightsCommand(trimmed);
+      if (parsed?.error) {
+        bus.emit("output:append", parsed.error);
+        return;
+      }
+
+      if (parsed?.action === "discard") {
+        const state = getWeightState();
+        if (!state.suggestions?.length) {
+          bus.emit("output:append", "IA weights: nenhum preview pendente.");
+          return;
+        }
+        clearWeightState();
+        bus.emit("output:append", "IA weights: preview descartado.");
+        return;
+      }
+
+      const { client, error } = getSupabaseClient();
+      if (error || !client) {
+        bus.emit(
+          "output:append",
+          "Supabase não configurado. Use auth --register ou auth para autenticar."
+        );
+        return;
+      }
+
+      const user = await getAuthenticatedUser(bus, client);
+      if (!user) return;
+
+      if (parsed?.action === "apply") {
+        const state = getWeightState();
+        if (!state.suggestions?.length) {
+          bus.emit("output:append", "IA weights: nenhum preview pendente.");
+          return;
+        }
+
+        const hasWeightColumn = await ensureRelationWeightColumn({
+          client,
+          userId: user.id,
+          bus,
+        });
+        if (!hasWeightColumn) {
+          bus.emit("output:append", "Não foi possível aplicar pesos sem a coluna weight.");
+          return;
+        }
+
+        const selection = parseSelection(parsed.selection, state.suggestions.length);
+        if (!selection) {
+          bus.emit("output:append", "Seleção inválida. Use: IA weights apply all | 1,3,5");
+          return;
+        }
+
+        const pendingSelection = selection.filter(
+          (index) => !state.appliedIds?.includes(index)
+        );
+        if (!pendingSelection.length) {
+          bus.emit("output:append", "IA weights: itens selecionados já aplicados.");
+          return;
+        }
+
+        let applied = [...(state.appliedIds ?? [])];
+        let updated = 0;
+        let skipped = 0;
+        let failed = 0;
+
+        for (const selectionIndex of pendingSelection) {
+          const suggestion = state.suggestions[selectionIndex - 1];
+          if (!suggestion) {
+            skipped += 1;
+            applied.push(selectionIndex);
+            continue;
+          }
+
+          const { data, error: updateError } = await client
+            .from("note_relations")
+            .update({ weight: suggestion.weight })
+            .eq("user_id", user.id)
+            .eq("from_note_id", suggestion.fromId)
+            .eq("to_note_id", suggestion.toId)
+            .eq("type", suggestion.type)
+            .select("from_note_id");
+
+          if (updateError) {
+            failed += 1;
+            bus.emit(
+              "output:append",
+              `Erro ao aplicar peso [${selectionIndex}]: ${updateError.message}`
+            );
+            continue;
+          }
+          if (!data || data.length === 0) {
+            skipped += 1;
+            applied.push(selectionIndex);
+            continue;
+          }
+
+          updated += 1;
+          applied.push(selectionIndex);
+        }
+
+        setWeightState({ ...state, appliedIds: applied });
+        bus.emit(
+          "output:append",
+          `IA weights — aplicado: ${updated}, ignorados: ${skipped}, erros: ${failed}.`
+        );
+        if (updated > 0) {
+          bus.emit("graph:refresh");
+        }
+        return;
+      }
+
+      if (parsed?.action === "preview") {
+        const apiKey = ensureGeminiKey(bus);
+        if (!apiKey) return;
+
+        const { notes, error: notesError } = await fetchNotes({
+          client,
+          userId: user.id,
+          scope: parsed.scope,
+        });
+
+        if (notesError) {
+          bus.emit("output:append", `Erro ao buscar notas: ${notesError.message}`);
+          return;
+        }
+
+        if (!notes || notes.length === 0) {
+          bus.emit("output:append", "IA weights: nenhuma nota encontrada.");
+          return;
+        }
+
+        const noteIds = notes.map((note) => note.id);
+        const ids = noteIds.join(",");
+        const hasWeightColumn = await ensureRelationWeightColumn({
+          client,
+          userId: user.id,
+          bus,
+        });
+        const relationFields = [
+          "from_note_id",
+          "to_note_id",
+          "type",
+          hasWeightColumn ? "weight" : null,
+        ]
+          .filter(Boolean)
+          .join(",");
+
+        const { data: relations, error: relError } = await client
+          .from("note_relations")
+          .select(relationFields)
+          .eq("user_id", user.id)
+          .or(`from_note_id.in.(${ids}),to_note_id.in.(${ids})`);
+
+        if (relError) {
+          bus.emit("output:append", `Erro ao buscar relações: ${relError.message}`);
+          return;
+        }
+
+        if (!relations || relations.length === 0) {
+          bus.emit("output:append", "IA weights: nenhuma relação encontrada.");
+          return;
+        }
+
+        let rawWeights = [];
+        try {
+          const prompt = buildWeightsPrompt(notes, relations);
+          const firstRaw = await generateText(prompt, apiKey);
+          const parsedWeights = parseWeightsJson(firstRaw);
+          if (parsedWeights.ok) {
+            rawWeights = parsedWeights.payload.weights ?? [];
+          } else {
+            const retryPrompt = buildWeightsRetryPrompt(notes, relations);
+            const retryRaw = await generateText(retryPrompt, apiKey);
+            const retryParsed = parseWeightsJson(retryRaw);
+            if (!retryParsed.ok) {
+              throw new Error("Resposta inválida do Gemini. JSON inválido.");
+            }
+            rawWeights = retryParsed.payload.weights ?? [];
+          }
+        } catch (error) {
+          bus.emit(
+            "output:append",
+            `ERR: ${error?.message ?? "Falha ao gerar pesos."}`
+          );
+          return;
+        }
+
+        const suggestions = normalizeWeightSuggestions(rawWeights, relations);
+
+        setWeightState({
+          lastGeneratedAt: new Date().toISOString(),
+          scope: parsed.scope,
+          noteCount: notes.length,
+          suggestions,
+          appliedIds: [],
+        });
+
+        if (!suggestions.length) {
+          bus.emit("output:append", "IA weights: nenhuma sugestão encontrada.");
+          return;
+        }
+
+        bus.emit("output:append", "IA weights — sugestões encontradas (preview):");
+        suggestions.forEach((suggestion, index) => {
+          bus.emit(
+            "output:append",
+            `[${index + 1}] ${suggestion.fromId} -> ${suggestion.toId} (type=${suggestion.type}, peso=${suggestion.weight})`
+          );
+          bus.emit("output:append", `    motivo: ${suggestion.reason || "sem motivo"}`);
+        });
+        bus.emit("output:append", "");
+        bus.emit("output:append", "- `IA weights apply all`");
+        bus.emit("output:append", "- `IA weights apply 1,2`");
+        bus.emit("output:append", "- `IA weights discard`");
+        return;
+      }
     }
 
     if (normalized.startsWith("ia seminar")) {
@@ -933,6 +1625,17 @@ export function iaCommand(bus) {
           );
         }
 
+        const hasWeightColumn = await ensureRelationWeightColumn({
+          client,
+          userId: user.id,
+          bus,
+        });
+        const hasConfidenceColumn = await ensureRelationConfidenceColumn({
+          client,
+          userId: user.id,
+          bus,
+        });
+
         let inserted = 0;
         let skipped = 0;
         let failed = 0;
@@ -940,9 +1643,23 @@ export function iaCommand(bus) {
 
         for (const suggestion of actionableSuggestions) {
           const { selectionIndex, fromId, toId, type } = suggestion;
+          const suggestedWeight = mapConfidenceToWeight(suggestion.confidence ?? 0);
+          if (suggestedWeight === null) {
+            skipped += 1;
+            applied.push(selectionIndex);
+            continue;
+          }
+
+          const existingFields = [
+            "id",
+            hasWeightColumn ? "weight" : null,
+            hasConfidenceColumn ? "confidence" : null,
+          ]
+            .filter(Boolean)
+            .join(",");
           const { data: existing, error: existingError } = await client
             .from("note_relations")
-            .select("id")
+            .select(existingFields)
             .eq("from_note_id", fromId)
             .eq("to_note_id", toId)
             .eq("type", type)
@@ -960,17 +1677,55 @@ export function iaCommand(bus) {
           }
 
           if (existing) {
+            let updates = null;
+            if (hasWeightColumn) {
+              const currentWeight = Number(existing.weight ?? 1);
+              const nextWeight = Math.max(currentWeight, suggestedWeight);
+              if (nextWeight !== currentWeight) {
+                updates = { ...(updates ?? {}), weight: nextWeight };
+              }
+            }
+            if (hasConfidenceColumn) {
+              updates = { ...(updates ?? {}), confidence: suggestion.confidence };
+            }
+            if (updates) {
+              const { error: updateError } = await client
+                .from("note_relations")
+                .update(updates)
+                .eq("id", existing.id)
+                .eq("user_id", user.id);
+              if (updateError) {
+                failed += 1;
+                bus.emit(
+                  "output:append",
+                  `Erro ao atualizar relação [${selectionIndex}]: ${updateError.message}`
+                );
+                continue;
+              }
+              inserted += 1;
+              applied.push(selectionIndex);
+              continue;
+            }
+
             skipped += 1;
             applied.push(selectionIndex);
             continue;
           }
 
-          const { error: insertError } = await client.from("note_relations").insert({
+          const payload = {
             from_note_id: fromId,
             to_note_id: toId,
             type,
             user_id: user.id,
-          });
+          };
+          if (hasWeightColumn) {
+            payload.weight = suggestedWeight;
+          }
+          if (hasConfidenceColumn) {
+            payload.confidence = suggestion.confidence;
+          }
+
+          const { error: insertError } = await client.from("note_relations").insert(payload);
 
           if (insertError) {
             failed += 1;
@@ -1273,7 +2028,7 @@ export function iaCommand(bus) {
 
     bus.emit(
       "output:append",
-      'Uso: IA | IA help | IA test | IA off | IA ask "<pergunta>" | IA pair brain [N|endless] | IA insight note id="uuid" | IA suggest links [LIMIT n] | IA summarize today | IA title note id="uuid" | IA seminar ...'
+      'Uso: IA | IA help | IA test | IA off | IA ask "<pergunta>" | IA pair brain [N|endless] | IA insight note id="uuid" | IA suggest links [LIMIT n] | IA summarize today | IA title note id="uuid" | IA seminar ... | IA ideas ... | IA weights ...'
     );
   };
 

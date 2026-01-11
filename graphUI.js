@@ -5,12 +5,26 @@ import { createGraphNoteWindow } from "./graphNoteWindow.js";
 import { createActionPopover } from "./ui/actionPopover.js";
 import { createConfirmModal } from "./ui/confirmModal.js";
 import { createRelationModal } from "./ui/relationModal.js";
+import { createRelationWeightModal } from "./ui/relationWeightModal.js";
 import { clearDeleteBySubjectState } from "./state/deleteBySubjectState.js";
 import { listRelationsForNote } from "./commands/rels.js";
+import { ensureNoteIdeaColumns, ensureRelationWeightColumn } from "./schemaUtils.js";
 
 const LABEL_LIMIT = 24;
 const DEPTH_MIN = 1;
 const DEPTH_MAX = 2;
+const WEIGHT_MIN = 1;
+const WEIGHT_MAX = 5;
+const IDEA_LEVEL_MIN = 1;
+const IDEA_LEVEL_MAX = 3;
+
+const EDGE_WEIGHT_STYLES = {
+  1: { width: 1.2, opacity: 0.55, glow: 0 },
+  2: { width: 2, opacity: 0.65, glow: 0 },
+  3: { width: 3, opacity: 0.8, glow: 6 },
+  4: { width: 4, opacity: 0.9, glow: 10 },
+  5: { width: 5, opacity: 1, glow: 14 },
+};
 
 function shortLabel(text = "") {
   const trimmed = text.trim();
@@ -23,6 +37,30 @@ function parseDepth(value) {
   const parsed = Number.parseInt(value, 10);
   if (Number.isNaN(parsed)) return DEPTH_MIN;
   return Math.min(Math.max(parsed, DEPTH_MIN), DEPTH_MAX);
+}
+
+function clampWeight(value) {
+  if (!Number.isFinite(value)) return WEIGHT_MIN;
+  return Math.min(Math.max(value, WEIGHT_MIN), WEIGHT_MAX);
+}
+
+function clampIdeaLevel(value) {
+  if (!Number.isFinite(value)) return IDEA_LEVEL_MIN;
+  return Math.min(Math.max(value, IDEA_LEVEL_MIN), IDEA_LEVEL_MAX);
+}
+
+function buildDisplayLabel({ shortLabel: shortLabelValue, isIdea, ideaLevel }) {
+  const pieces = [];
+  if (isIdea) {
+    pieces.push("★");
+  }
+  if (ideaLevel) {
+    pieces.push(`${ideaLevel} ·`);
+  }
+  if (pieces.length > 0) {
+    return `${pieces.join(" ")} ${shortLabelValue}`;
+  }
+  return shortLabelValue;
 }
 
 function buildSubgraph(noteId, depth, relations) {
@@ -52,15 +90,29 @@ function mapElements(notes, relations, allowedIds) {
   const noteSet = new Set(allowedIds ?? notes.map((note) => note.id));
   const nodes = notes
     .filter((note) => noteSet.has(note.id))
-    .map((note) => ({
-      data: {
-        id: note.id,
-        label: shortLabel(note.subject),
-        subject: note.subject ?? "",
-        moment: note.moment ?? "",
-        created_at: note.created_at ?? "",
-      },
-    }));
+    .map((note) => {
+      const isIdea = Boolean(note.is_idea);
+      const ideaLevel = isIdea ? clampIdeaLevel(Number(note.idea_level ?? 1)) : null;
+      const shortLabelValue = shortLabel(note.subject ?? "");
+      const levelLabel = ideaLevel ? String(ideaLevel) : "";
+      return {
+        data: {
+          id: note.id,
+          subject: note.subject ?? "",
+          moment: note.moment ?? "",
+          created_at: note.created_at ?? "",
+          is_idea: isIdea,
+          idea_level: ideaLevel,
+          level_label: levelLabel,
+          short_label: shortLabelValue,
+          display_label: buildDisplayLabel({
+            shortLabel: shortLabelValue,
+            isIdea,
+            ideaLevel: levelLabel,
+          }),
+        },
+      };
+    });
 
   const edges = relations
     .filter((rel) => noteSet.has(rel.from_note_id) && noteSet.has(rel.to_note_id))
@@ -69,10 +121,11 @@ function mapElements(notes, relations, allowedIds) {
         id: `${rel.from_note_id}-${rel.to_note_id}-${rel.type}`,
         source: rel.from_note_id,
         target: rel.to_note_id,
-        type: rel.type ?? "",
+        type: rel.type ?? "related",
         from_note_id: rel.from_note_id,
         to_note_id: rel.to_note_id,
         rel_id: rel.id ?? null,
+        weight: clampWeight(Number(rel.weight ?? 1)),
       },
     }));
 
@@ -93,6 +146,7 @@ export function createGraphUI(bus, focusManager) {
   const actionPopover = createActionPopover();
   const confirmModal = createConfirmModal(document.body);
   const relationModal = createRelationModal(overlay);
+  const relationWeightModal = createRelationWeightModal(overlay);
   const connectToast = createGraphToast(overlay);
 
   let cy = null;
@@ -132,10 +186,23 @@ export function createGraphUI(bus, focusManager) {
   function getThemeTokens() {
     const styles = getComputedStyle(document.documentElement);
     return {
-      bg: styles.getPropertyValue("--bg").trim() || "#000",
-      fg: styles.getPropertyValue("--fg").trim() || "#0f0",
-      border: styles.getPropertyValue("--border").trim() || "#0f0",
-      accent: styles.getPropertyValue("--accent").trim() || "#0f0",
+      bg: styles.getPropertyValue("--bg").trim(),
+      fg: styles.getPropertyValue("--fg").trim(),
+      border: styles.getPropertyValue("--border").trim(),
+      accent: styles.getPropertyValue("--accent").trim(),
+      nodeBg: styles.getPropertyValue("--node-bg").trim(),
+      nodeFg: styles.getPropertyValue("--node-fg").trim(),
+      nodeBorder: styles.getPropertyValue("--node-border").trim(),
+      insightNodeBg: styles.getPropertyValue("--insight-node-bg").trim(),
+      insightNodeFg: styles.getPropertyValue("--insight-node-fg").trim(),
+      levelBadgeBg: styles.getPropertyValue("--level-badge-bg").trim(),
+      levelBadgeFg: styles.getPropertyValue("--level-badge-fg").trim(),
+      edgeColor: styles.getPropertyValue("--edge-color").trim(),
+      edgeStrongColor: styles.getPropertyValue("--edge-strong-color").trim(),
+      edgeGlowColor: styles.getPropertyValue("--edge-glow-color").trim(),
+      ideaBorderColor: styles.getPropertyValue("--idea-border-color").trim(),
+      ideaGlowColor: styles.getPropertyValue("--idea-glow-color").trim(),
+      ideaBadgeColor: styles.getPropertyValue("--idea-badge-color").trim(),
     };
   }
 
@@ -143,26 +210,26 @@ export function createGraphUI(bus, focusManager) {
     return getCurrentTheme() === "steve";
   }
 
-  function getEdgeStyle(border) {
+  function getEdgeStyle({ edgeColor, edgeStrongColor, edgeGlowColor }) {
     if (isSteveTheme()) {
       return {
-        width: 3,
-        "line-color": "#ff2b3a",
+        width: EDGE_WEIGHT_STYLES[2].width,
+        "line-color": edgeStrongColor || edgeColor,
         "target-arrow-shape": "triangle",
-        "target-arrow-color": "#ff2b3a",
+        "target-arrow-color": edgeStrongColor || edgeColor,
         "curve-style": "bezier",
         opacity: 0.75,
-        "shadow-blur": 12,
-        "shadow-color": "rgba(255, 43, 58, 0.7)",
+        "shadow-blur": EDGE_WEIGHT_STYLES[3].glow,
+        "shadow-color": edgeGlowColor,
         "shadow-opacity": 0.8,
       };
     }
 
     return {
-      width: 1,
-      "line-color": border,
+      width: EDGE_WEIGHT_STYLES[1].width,
+      "line-color": edgeColor,
       "target-arrow-shape": "triangle",
-      "target-arrow-color": border,
+      "target-arrow-color": edgeColor,
       "curve-style": "bezier",
     };
   }
@@ -184,12 +251,10 @@ export function createGraphUI(bus, focusManager) {
     if (!cy) return;
 
     const edges = cy.edges();
-    const minWidth = 2.5;
-    const maxWidth = 3.5;
     const minOpacity = 0.6;
-    const maxOpacity = 0.85;
-    const minShadow = 8;
-    const maxShadow = 14;
+    const maxOpacity = 0.9;
+    const minShadow = 4;
+    const maxShadow = 16;
     const speed = 0.6;
 
     const tick = (timestamp) => {
@@ -201,11 +266,15 @@ export function createGraphUI(bus, focusManager) {
       const elapsed = (timestamp - edgePulseStart) / 1000;
       const wave = (Math.sin(elapsed * Math.PI * 2 * speed) + 1) / 2;
       const glowWave = (Math.sin(elapsed * Math.PI * 2 * speed + Math.PI / 2) + 1) / 2;
-      const width = minWidth + (maxWidth - minWidth) * wave;
       const opacity = minOpacity + (maxOpacity - minOpacity) * glowWave;
-      const shadowBlur = minShadow + (maxShadow - minShadow) * glowWave;
 
-      edges.style({ width, opacity, "shadow-blur": shadowBlur });
+      edges.forEach((edge) => {
+        const weight = clampWeight(Number(edge.data("weight") ?? 1));
+        const base = EDGE_WEIGHT_STYLES[weight] ?? EDGE_WEIGHT_STYLES[1];
+        const width = base.width + wave * 0.8;
+        const shadowBlur = Math.max(base.glow, minShadow + (maxShadow - minShadow) * glowWave);
+        edge.style({ width, opacity, "shadow-blur": shadowBlur });
+      });
       edgePulseFrame = requestAnimationFrame(tick);
     };
 
@@ -220,18 +289,61 @@ export function createGraphUI(bus, focusManager) {
     stopSteveEdgePulse();
   }
 
-  function applyGraphTheme() {
-    if (!cy) return;
-    const { bg, fg, border, accent } = getThemeTokens();
-    cy.style([
+  function buildGraphStyles(tokens) {
+    const {
+      bg,
+      fg,
+      border,
+      nodeBg,
+      nodeFg,
+      nodeBorder,
+      insightNodeBg,
+      insightNodeFg,
+      levelBadgeBg,
+      levelBadgeFg,
+      accent,
+      edgeColor,
+      edgeStrongColor,
+      edgeGlowColor,
+      ideaBorderColor,
+      ideaGlowColor,
+      ideaBadgeColor,
+    } = tokens;
+
+    const edgeBase = getEdgeStyle({ edgeColor, edgeStrongColor, edgeGlowColor });
+    const edgeWeightSelectors = Object.entries(EDGE_WEIGHT_STYLES).map(
+      ([weightKey, config]) => {
+        const weight = Number(weightKey);
+        const isStrong = weight >= 4;
+        const shadowBlur = weight >= 5 ? config.glow : isStrong ? config.glow : 0;
+        return {
+          selector: `edge[weight = ${weight}]`,
+          style: {
+            width: config.width,
+            opacity: config.opacity,
+            "line-color": isStrong ? edgeStrongColor : edgeColor,
+            "target-arrow-color": isStrong ? edgeStrongColor : edgeColor,
+            ...(shadowBlur
+              ? {
+                  "shadow-blur": shadowBlur,
+                  "shadow-color": edgeGlowColor,
+                  "shadow-opacity": 0.8,
+                }
+              : {}),
+          },
+        };
+      }
+    );
+
+    return [
       {
         selector: "node",
         style: {
-          "background-color": bg,
-          "border-color": border,
+          "background-color": nodeBg,
+          "border-color": nodeBorder,
           "border-width": 1,
-          color: fg,
-          label: "data(label)",
+          color: nodeFg,
+          label: "data(display_label)",
           "font-size": 10,
           "text-wrap": "wrap",
           "text-max-width": 80,
@@ -239,7 +351,53 @@ export function createGraphUI(bus, focusManager) {
       },
       {
         selector: "edge",
-        style: getEdgeStyle(border),
+        style: edgeBase,
+      },
+      {
+        selector: "node[is_idea]",
+        style: {
+          "background-color": insightNodeBg,
+          color: insightNodeFg,
+          "border-color": ideaBorderColor || nodeBorder,
+          "border-width": 2,
+          "shadow-color": ideaGlowColor,
+          "shadow-opacity": 0.5,
+        },
+      },
+      {
+        selector: "node[idea_level]",
+        style: {
+          "text-outline-color": levelBadgeBg,
+          "text-outline-width": 2,
+          color: levelBadgeFg || nodeFg,
+        },
+      },
+      {
+        selector: "node[is_idea][idea_level = 1]",
+        style: {
+          width: 34,
+          height: 34,
+          "shadow-blur": 6,
+          color: ideaBadgeColor || fg,
+        },
+      },
+      {
+        selector: "node[is_idea][idea_level = 2]",
+        style: {
+          width: 38,
+          height: 38,
+          "shadow-blur": 10,
+          color: ideaBadgeColor || fg,
+        },
+      },
+      {
+        selector: "node[is_idea][idea_level = 3]",
+        style: {
+          width: 42,
+          height: 42,
+          "shadow-blur": 14,
+          color: ideaBadgeColor || fg,
+        },
       },
       {
         selector: "node:selected",
@@ -258,7 +416,13 @@ export function createGraphUI(bus, focusManager) {
           "shadow-opacity": 0.6,
         },
       },
-    ]);
+      ...edgeWeightSelectors,
+    ];
+  }
+
+  function applyGraphTheme() {
+    if (!cy) return;
+    cy.style(buildGraphStyles(getThemeTokens()));
     updateSteveEdgePulse();
   }
 
@@ -315,9 +479,10 @@ export function createGraphUI(bus, focusManager) {
     const toSubject = await resolveNoteSubject(data.to_note_id, data.to_note_id);
     const createdAt = relInfo?.created_at ? ` | ${relInfo.created_at}` : "";
     const type = data.type ?? relInfo?.type ?? "related";
+    const weight = clampWeight(Number(relInfo?.weight ?? data.weight ?? 1));
     bus.emit(
       "output:append",
-      `Relação: (${type}) ${fromSubject} -> ${toSubject}${createdAt}`
+      `Relação: (${type}) ${fromSubject} -> ${toSubject} | peso ${weight}${createdAt}`
     );
   }
 
@@ -327,46 +492,10 @@ export function createGraphUI(bus, focusManager) {
       bus.emit("output:append", "Cytoscape.js não carregado.");
       return null;
     }
-    const { bg, fg, border, accent } = getThemeTokens();
     cy = window.cytoscape({
       container: canvas,
       elements: [],
-      style: [
-        {
-          selector: "node",
-          style: {
-            "background-color": bg,
-            "border-color": border,
-            "border-width": 1,
-            color: fg,
-            label: "data(label)",
-            "font-size": 10,
-            "text-wrap": "wrap",
-            "text-max-width": 80,
-          },
-        },
-        {
-          selector: "edge",
-          style: getEdgeStyle(border),
-        },
-        {
-          selector: "node:selected",
-          style: {
-            "background-color": accent,
-            color: bg,
-          },
-        },
-        {
-          selector: "node.connect-source",
-          style: {
-            "border-color": accent,
-            "border-width": 3,
-            "shadow-blur": 10,
-            "shadow-color": accent,
-            "shadow-opacity": 0.6,
-          },
-        },
-      ],
+      style: buildGraphStyles(getThemeTokens()),
       layout: { name: "cose", animate: false },
     });
 
@@ -376,6 +505,7 @@ export function createGraphUI(bus, focusManager) {
         handleConnectTarget(data);
         return;
       }
+      const isIdea = Boolean(data.is_idea);
       openActionPopoverAtEvent(
         `node:${data.id}`,
         event,
@@ -397,6 +527,36 @@ export function createGraphUI(bus, focusManager) {
             label: "Consultar relações",
             action: () => {
               listRelationsForNote(bus, data.id);
+            },
+          },
+          {
+            label: isIdea ? "Remover ideia" : "Marcar como ideia",
+            action: () => {
+              updateNoteIdeaStatus({
+                noteId: data.id,
+                isIdea: !isIdea,
+                ideaLevel: clampIdeaLevel(Number(data.idea_level ?? 1)),
+              });
+            },
+          },
+          {
+            label: "Ajustar nível (1..3)",
+            action: () => {
+              openActionPopoverAtEvent(
+                `node:${data.id}:idea-level`,
+                event,
+                [1, 2, 3].map((level) => ({
+                  label: `Nível ${level}`,
+                  action: () => {
+                    updateNoteIdeaStatus({
+                      noteId: data.id,
+                      isIdea: true,
+                      ideaLevel: level,
+                    });
+                  },
+                })),
+                "Nível da ideia"
+              );
             },
           },
           {
@@ -424,23 +584,18 @@ export function createGraphUI(bus, focusManager) {
             },
           },
           {
-            label: "Abrir origem",
+            label: "Ajustar peso (1..5)",
             action: () => {
-              showDetails({
-                id: data.from_note_id,
-                subject: noteSubjects.get(data.from_note_id) ?? "",
+              openRelationWeightModal({
+                relationData: data,
+                currentWeight: clampWeight(Number(data.weight ?? 1)),
               });
-              noteWindow.open(noteBodies.get(data.from_note_id) ?? "");
             },
           },
           {
-            label: "Abrir destino",
+            label: "Reforçar (+1)",
             action: () => {
-              showDetails({
-                id: data.to_note_id,
-                subject: noteSubjects.get(data.to_note_id) ?? "",
-              });
-              noteWindow.open(noteBodies.get(data.to_note_id) ?? "");
+              reinforceRelationWeight(data);
             },
           },
           {
@@ -534,26 +689,48 @@ export function createGraphUI(bus, focusManager) {
     const user = await getAuthenticatedUser(clientResponse.client);
     if (!user) return;
 
-    const [hasRelationId, hasRelationCreatedAt] = await Promise.all([
-      ensureRelationIdColumn(clientResponse.client, user.id),
-      ensureRelationCreatedAtColumn(clientResponse.client, user.id),
-    ]);
-    const relationSelectFields = hasRelationId
-      ? "id,from_note_id,to_note_id,type"
-      : "from_note_id,to_note_id,type";
-    const relationFields = hasRelationCreatedAt
-      ? `${relationSelectFields},created_at`
-      : relationSelectFields;
+    const [hasRelationId, hasRelationCreatedAt, hasRelationWeight, hasNoteIdea] =
+      await Promise.all([
+        ensureRelationIdColumn(clientResponse.client, user.id),
+        ensureRelationCreatedAtColumn(clientResponse.client, user.id),
+        ensureRelationWeightColumn({
+          client: clientResponse.client,
+          userId: user.id,
+          bus,
+        }),
+        ensureNoteIdeaColumns({ client: clientResponse.client, userId: user.id, bus }),
+      ]);
+    const relationSelectFields = [
+      hasRelationId ? "id" : null,
+      "from_note_id",
+      "to_note_id",
+      "type",
+      hasRelationWeight ? "weight" : null,
+      hasRelationCreatedAt ? "created_at" : null,
+    ]
+      .filter(Boolean)
+      .join(",");
+    const noteSelectFields = [
+      "id",
+      "subject",
+      "moment",
+      "created_at",
+      "body",
+      hasNoteIdea ? "is_idea" : null,
+      hasNoteIdea ? "idea_level" : null,
+    ]
+      .filter(Boolean)
+      .join(",");
 
     const [notesResponse, relsResponse] = await Promise.all([
       clientResponse.client
         .from("notes")
-        .select("id,subject,moment,created_at,body")
+        .select(noteSelectFields)
         .eq("user_id", user.id)
         .order("created_at", { ascending: false }),
       clientResponse.client
         .from("note_relations")
-        .select(relationFields)
+        .select(relationSelectFields)
         .eq("user_id", user.id),
     ]);
 
@@ -641,6 +818,13 @@ export function createGraphUI(bus, focusManager) {
   bus.on("focus:changed", () => {
     if (!isOpen) return;
     loadGraph({ focusNoteId: focusManager?.getFocusNoteId?.() ?? null });
+  });
+
+  bus.on("graph:node:update", (payload = {}) => {
+    if (!isOpen || !cy) return;
+    const { id, is_idea, idea_level, subject } = payload;
+    if (!id) return;
+    updateNodeIdeaState({ noteId: id, isIdea: Boolean(is_idea), ideaLevel: idea_level, subject });
   });
 
   bus.on("connect:start", ({ fromNoteId, fromSubject } = {}) => {
@@ -771,7 +955,7 @@ export function createGraphUI(bus, focusManager) {
     });
   }
 
-  function addRelationEdge({ fromId, toId, type }) {
+  function addRelationEdge({ fromId, toId, type, weight = WEIGHT_MIN }) {
     if (!cy) return;
     const edgeId = `${fromId}-${toId}-${type}`;
     if (cy.getElementById(edgeId).length > 0) return;
@@ -783,6 +967,7 @@ export function createGraphUI(bus, focusManager) {
         type,
         from_note_id: fromId,
         to_note_id: toId,
+        weight: clampWeight(Number(weight ?? WEIGHT_MIN)),
       },
     });
   }
@@ -852,8 +1037,204 @@ export function createGraphUI(bus, focusManager) {
     }
 
     bus.emit("output:append", `Relação criada: (${type}) ${fromId} -> ${toId}`);
-    addRelationEdge({ fromId, toId, type });
+    addRelationEdge({ fromId, toId, type, weight: WEIGHT_MIN });
+    relationCache = [
+      ...relationCache,
+      { from_note_id: fromId, to_note_id: toId, type, weight: WEIGHT_MIN },
+    ];
     return { ok: true };
+  }
+
+  function updateNodeIdeaState({ noteId, isIdea, ideaLevel, subject }) {
+    if (!cy || !noteId) return;
+    const node = cy.getElementById(noteId);
+    if (!node || node.length === 0) return;
+    const level = isIdea ? clampIdeaLevel(Number(ideaLevel ?? 1)) : null;
+    const levelLabel = level ? String(level) : "";
+    const nextSubject = subject ?? node.data("subject") ?? "";
+    const shortLabelValue = shortLabel(nextSubject);
+
+    node.data("subject", nextSubject);
+    node.data("is_idea", isIdea);
+    node.data("idea_level", level);
+    node.data("level_label", levelLabel);
+    node.data("short_label", shortLabelValue);
+    node.data(
+      "display_label",
+      buildDisplayLabel({
+        shortLabel: shortLabelValue,
+        isIdea,
+        ideaLevel: levelLabel,
+      })
+    );
+  }
+
+  async function updateNoteIdeaStatus({ noteId, isIdea, ideaLevel }) {
+    if (!noteId) return;
+    const clientResponse = getSupabaseClient();
+    if (clientResponse.error || !clientResponse.client) {
+      bus.emit("output:append", "Supabase não configurado. Use auth --register ou auth para autenticar.");
+      return;
+    }
+
+    const user = await getAuthenticatedUser(clientResponse.client);
+    if (!user) return;
+
+    const hasIdeaColumns = await ensureNoteIdeaColumns({
+      client: clientResponse.client,
+      userId: user.id,
+      bus,
+    });
+    if (!hasIdeaColumns) {
+      bus.emit("output:append", "Não foi possível atualizar ideias sem as colunas de ideia.");
+      return;
+    }
+
+    const level = clampIdeaLevel(Number(ideaLevel ?? 1));
+    const updates = isIdea
+      ? {
+          is_idea: true,
+          idea_level: level,
+          idea_source: "manual",
+          idea_marked_at: new Date().toISOString(),
+        }
+      : {
+          is_idea: false,
+          idea_source: null,
+          idea_marked_at: null,
+        };
+
+    const { data, error } = await clientResponse.client
+      .from("notes")
+      .update(updates)
+      .eq("id", noteId)
+      .eq("user_id", user.id)
+      .select("id,is_idea,idea_level,subject");
+
+    if (error) {
+      bus.emit("output:append", `Erro ao atualizar ideia: ${error.message}`);
+      return;
+    }
+
+    if (!data || data.length === 0) {
+      bus.emit("output:append", "Nenhuma nota encontrada para atualizar.");
+      return;
+    }
+
+    bus.emit(
+      "output:append",
+      isIdea ? `Nota ${noteId} marcada como ideia.` : `Nota ${noteId} removida de ideias.`
+    );
+    updateNodeIdeaState({
+      noteId,
+      isIdea,
+      ideaLevel: data[0]?.idea_level ?? ideaLevel,
+      subject: data[0]?.subject,
+    });
+  }
+
+  function updateRelationCacheWeight(relData, weight) {
+    relationCache = relationCache.map((rel) => {
+      if (relData.rel_id && rel.id) {
+        if (rel.id === relData.rel_id) {
+          return { ...rel, weight };
+        }
+        return rel;
+      }
+      if (
+        rel.from_note_id === relData.from_note_id &&
+        rel.to_note_id === relData.to_note_id &&
+        (relData.type ? rel.type === relData.type : true)
+      ) {
+        return { ...rel, weight };
+      }
+      return rel;
+    });
+  }
+
+  function updateEdgeWeight(relData, weight) {
+    if (!cy) return;
+    const edgeId = `${relData.from_note_id}-${relData.to_note_id}-${relData.type ?? "related"}`;
+    const edge = cy.getElementById(edgeId);
+    if (edge && edge.length > 0) {
+      edge.data("weight", weight);
+    }
+  }
+
+  async function updateRelationWeight(relData, weight) {
+    const clientResponse = getSupabaseClient();
+    if (clientResponse.error || !clientResponse.client) {
+      bus.emit("output:append", "Supabase não configurado. Use auth --register ou auth para autenticar.");
+      return { ok: false };
+    }
+
+    const user = await getAuthenticatedUser(clientResponse.client);
+    if (!user) return { ok: false };
+
+    const hasWeight = await ensureRelationWeightColumn({
+      client: clientResponse.client,
+      userId: user.id,
+      bus,
+    });
+    if (!hasWeight) {
+      bus.emit("output:append", "Não foi possível ajustar peso sem a coluna weight.");
+      return { ok: false };
+    }
+
+    const normalizedWeight = clampWeight(Number(weight));
+    let query = clientResponse.client
+      .from("note_relations")
+      .update({ weight: normalizedWeight })
+      .eq("user_id", user.id);
+    if (relData.rel_id) {
+      query = query.eq("id", relData.rel_id);
+    } else {
+      query = query
+        .eq("from_note_id", relData.from_note_id)
+        .eq("to_note_id", relData.to_note_id);
+      if (relData.type) {
+        query = query.eq("type", relData.type);
+      }
+    }
+
+    const { data, error } = await query.select("from_note_id,to_note_id,type,weight");
+    if (error) {
+      bus.emit("output:append", `Erro ao ajustar peso: ${error.message}`);
+      return { ok: false };
+    }
+    if (!data || data.length === 0) {
+      bus.emit("output:append", "Nenhuma relação encontrada para atualizar.");
+      return { ok: false };
+    }
+
+    data.forEach((rel) => {
+      updateRelationCacheWeight(rel, normalizedWeight);
+      updateEdgeWeight(rel, normalizedWeight);
+    });
+
+    bus.emit("output:append", `Peso atualizado para ${normalizedWeight}.`);
+    return { ok: true };
+  }
+
+  function openRelationWeightModal({ relationData, currentWeight }) {
+    relationWeightModal.open({
+      currentWeight,
+      onSelect: async (weight) => {
+        const result = await updateRelationWeight(relationData, weight);
+        if (!result.ok) {
+          return { errorMessage: "Não foi possível atualizar o peso." };
+        }
+        return true;
+      },
+      onCancel: () => {},
+    });
+  }
+
+  async function reinforceRelationWeight(relData) {
+    const relInfo = findRelationInfo(relData);
+    const current = clampWeight(Number(relInfo?.weight ?? relData.weight ?? WEIGHT_MIN));
+    const nextWeight = clampWeight(current + 1);
+    await updateRelationWeight(relData, nextWeight);
   }
 
   function confirmDeleteNote(data) {
