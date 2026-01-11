@@ -35,6 +35,7 @@ import { createMicController } from "./voice/micController.js";
 import { brainTrainCommand } from "./commands/brainTrain.js";
 import { editorCommand } from "./commands/editor.js";
 import { openCommand } from "./commands/open.js";
+import { targetCommand } from "./commands/target.js";
 import { createNoteViewer } from "./ui/noteViewer.js";
 
 const bus = createEventBus();
@@ -94,6 +95,8 @@ const commands = {
   brain: brainTrainCommand(bus),
   editor: editorCommand(bus),
   open: openCommand(bus),
+  target: targetCommand(bus),
+  TARGET: targetCommand(bus),
   mic: () => micController.open(),
 };
 

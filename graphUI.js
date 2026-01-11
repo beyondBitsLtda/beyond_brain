@@ -2,7 +2,7 @@ import { getSupabaseClient } from "./supabaseClient.js";
 import { clearSession } from "./sessionStore.js";
 import { getCurrentTheme } from "./themeManager.js";
 import { createGraphNoteWindow } from "./graphNoteWindow.js";
-import { createContextMenu } from "./ui/contextMenu.js";
+import { createActionPopover } from "./ui/actionPopover.js";
 import { createConfirmModal } from "./ui/confirmModal.js";
 import { createRelationModal } from "./ui/relationModal.js";
 import { clearDeleteBySubjectState } from "./state/deleteBySubjectState.js";
@@ -89,7 +89,7 @@ export function createGraphUI(bus, focusManager) {
   const detailMoment = document.getElementById("graph-detail-moment");
   const detailCreated = document.getElementById("graph-detail-created");
   const noteWindow = createGraphNoteWindow(overlay);
-  const contextMenu = createContextMenu();
+  const actionPopover = createActionPopover();
   const confirmModal = createConfirmModal(document.body);
   const relationModal = createRelationModal(overlay);
   const connectToast = createGraphToast(overlay);
@@ -266,25 +266,25 @@ export function createGraphUI(bus, focusManager) {
     }
   });
 
-  canvas?.addEventListener(
-    "contextmenu",
-    (event) => {
-      event.preventDefault();
-    },
-    { capture: true }
-  );
+  function copyToClipboard(label, value) {
+    if (!value) return;
+    if (navigator?.clipboard?.writeText) {
+      navigator.clipboard.writeText(String(value)).then(
+        () => {
+          bus.emit("output:append", `${label} copiado.`);
+        },
+        () => {
+          bus.emit("output:append", `Não foi possível copiar ${label}.`);
+        }
+      );
+      return;
+    }
+    bus.emit("output:append", `Clipboard indisponível para copiar ${label}.`);
+  }
 
-  function suppressContextMenuEvent(originalEvent) {
-    if (!originalEvent) return;
-    if (typeof originalEvent.preventDefault === "function") {
-      originalEvent.preventDefault();
-    }
-    if (typeof originalEvent.stopPropagation === "function") {
-      originalEvent.stopPropagation();
-    }
-    if (typeof originalEvent.stopImmediatePropagation === "function") {
-      originalEvent.stopImmediatePropagation();
-    }
+  function openActionPopoverAtEvent(event, items) {
+    const { clientX = 0, clientY = 0 } = event?.originalEvent ?? event ?? {};
+    actionPopover.open({ x: clientX, y: clientY, items });
   }
 
   function showDetails(data) {
@@ -360,51 +360,56 @@ export function createGraphUI(bus, focusManager) {
         handleConnectTarget(data);
         return;
       }
+      if (event.originalEvent?.shiftKey) {
+        openActionPopoverAtEvent(event, [
+          {
+            label: "Criar relação...",
+            action: () => {
+              startConnectMode({ fromNoteId: data.id, fromSubject: data.subject ?? "" });
+            },
+          },
+          {
+            label: "Deletar nota",
+            danger: true,
+            action: () => {
+              confirmDeleteNote(data);
+            },
+          },
+          {
+            label: "Copiar ID curto",
+            action: () => {
+              copyToClipboard("ID", String(data.id ?? "").slice(0, 8));
+            },
+          },
+          {
+            label: "Copiar subject",
+            action: () => {
+              copyToClipboard("subject", data.subject ?? "");
+            },
+          },
+        ]);
+        return;
+      }
       showDetails(data);
       noteWindow.open(noteBodies.get(data.id) ?? "");
     });
 
-    cy.on("cxttap", "node", (event) => {
+    cy.on("tap", "edge", (event) => {
       const data = event.target.data();
-      suppressContextMenuEvent(event.originalEvent);
-      const { clientX, clientY } = event.originalEvent ?? {};
-      contextMenu.open(clientX ?? 0, clientY ?? 0, [
-        {
-          label: "Abrir conteúdo",
-          action: () => {
-            showDetails(data);
-            noteWindow.open(noteBodies.get(data.id) ?? "");
+      if (event.originalEvent?.shiftKey) {
+        openActionPopoverAtEvent(event, [
+          {
+            label: "Deletar relação",
+            danger: true,
+            action: () => {
+              confirmDeleteRelation(data, event.target);
+            },
           },
-        },
-        {
-          label: "Criar relação...",
-          action: () => {
-            startConnectMode({ fromNoteId: data.id, fromSubject: data.subject ?? "" });
-          },
-        },
-        {
-          label: "Deletar nota",
-          danger: true,
-          action: () => {
-            confirmDeleteNote(data);
-          },
-        },
-      ]);
-    });
-
-    cy.on("cxttap", "edge", (event) => {
-      const data = event.target.data();
-      suppressContextMenuEvent(event.originalEvent);
-      const { clientX, clientY } = event.originalEvent ?? {};
-      contextMenu.open(clientX ?? 0, clientY ?? 0, [
-        {
-          label: "Deletar relação",
-          danger: true,
-          action: () => {
-            confirmDeleteRelation(data, event.target);
-          },
-        },
-      ]);
+        ]);
+        return;
+      }
+      const label = `(${data.type ?? "related"}) ${data.from_note_id} -> ${data.to_note_id}`;
+      bus.emit("output:append", `Detalhes da relação: ${label}`);
     });
 
     cy.on("tap", (event) => {
@@ -597,7 +602,7 @@ export function createGraphUI(bus, focusManager) {
       fromSubject: fromSubject ?? "",
     };
     setConnectHighlight(fromNoteId, true);
-    connectToast.show("Selecione o nó de destino ou pressione ESC para cancelar.");
+    connectToast.show("Clique no nó destino. ESC cancela.");
   }
 
   function cancelConnectMode() {

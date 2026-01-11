@@ -401,7 +401,8 @@ body::after {
   color: var(--accent);
 }
 
-.context-menu {
+.context-menu,
+.action-popover {
   position: fixed;
   z-index: 5;
   display: flex;
@@ -415,11 +416,13 @@ body::after {
   box-shadow: 0 0 12px var(--glow);
 }
 
-.context-menu[hidden] {
+.context-menu[hidden],
+.action-popover[hidden] {
   display: none;
 }
 
-.context-menu__item {
+.context-menu__item,
+.action-popover__item {
   border: none;
   background: transparent;
   color: inherit;
@@ -431,17 +434,22 @@ body::after {
 }
 
 .context-menu__item:hover,
-.context-menu__item:focus-visible {
+.context-menu__item:focus-visible,
+.action-popover__item:hover,
+.action-popover__item:focus-visible {
   background: var(--accent);
   color: var(--bg);
 }
 
-.context-menu__item--danger {
+.context-menu__item--danger,
+.action-popover__item--danger {
   color: var(--danger, var(--accent));
 }
 
 .context-menu__item--danger:hover,
-.context-menu__item--danger:focus-visible {
+.context-menu__item--danger:focus-visible,
+.action-popover__item--danger:hover,
+.action-popover__item--danger:focus-visible {
   background: var(--danger, var(--accent));
   color: var(--bg);
 }
