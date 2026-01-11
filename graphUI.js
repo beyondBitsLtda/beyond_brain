@@ -366,7 +366,7 @@ export function createGraphUI(bus, focusManager) {
 
     debugLog("styles: insight selector node[is_idea = true], level selector node[level_set = true]");
 
-    return [
+    const styles = [
       {
         selector: "node",
         style: {
@@ -383,17 +383,6 @@ export function createGraphUI(bus, focusManager) {
       {
         selector: "edge",
         style: edgeBase,
-      },
-      {
-        selector: "node[is_idea = true]",
-        style: {
-          "background-color": insightNodeBg,
-          color: insightNodeFg,
-          "border-color": insightNodeBorder || nodeBorder,
-          "border-width": 4,
-          "shadow-color": ideaGlowColor,
-          "shadow-opacity": 0.5,
-        },
       },
       {
         selector: "node[level_set = true]",
@@ -420,8 +409,35 @@ export function createGraphUI(bus, focusManager) {
           "shadow-opacity": 0.6,
         },
       },
+      {
+        selector: "node[is_idea = true]",
+        style: {
+          "background-color": insightNodeBg,
+          color: insightNodeFg,
+          "border-color": insightNodeBorder || nodeBorder,
+          "border-width": 4,
+          "shadow-color": ideaGlowColor,
+          "shadow-opacity": 0.5,
+        },
+      },
+      {
+        selector: "node[is_idea = true]:selected",
+        style: {
+          "background-color": insightNodeBg,
+          color: insightNodeFg,
+          "border-color": insightNodeBorder || nodeBorder,
+          "border-width": 4,
+        },
+      },
       ...edgeWeightSelectors,
     ];
+
+    debugLog(
+      "style selectors order",
+      styles.map((style) => style.selector)
+    );
+
+    return styles;
   }
 
   function applyGraphTheme() {
