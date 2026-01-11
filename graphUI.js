@@ -730,18 +730,8 @@ export function createGraphUI(bus, focusManager) {
     ]
       .filter(Boolean)
       .join(",");
-    const noteSelectFields = [
-      "id",
-      "subject",
-      "created_at",
-      "moment",
-      "body",
-      hasNoteIdea ? "is_idea" : null,
-      hasNoteIdea ? "idea_level" : null,
-      hasNoteIdea && hasLevelSet ? "level_set" : null,
-    ]
-      .filter(Boolean)
-      .join(",");
+    const noteSelectFields =
+      "id,subject,created_at,moment,body,is_idea,idea_level,level_set";
     debugLog("notes select fields", noteSelectFields);
 
     const [notesResponse, relsResponse] = await Promise.all([
@@ -871,6 +861,28 @@ export function createGraphUI(bus, focusManager) {
   bus.on("focus:changed", () => {
     if (!isOpen) return;
     loadGraph({ focusNoteId: focusManager?.getFocusNoteId?.() ?? null });
+  });
+  bus.on("graph:debug:insight", ({ noteId } = {}) => {
+    if (!noteId) return;
+    if (!isOpen || !cy) {
+      bus.emit("output:append", "Graph fechado. Abra o grafo para inspecionar o node.");
+      return;
+    }
+    const node = cy.getElementById(noteId);
+    if (!node || node.length === 0) {
+      bus.emit("output:append", "Node não encontrado no Cytoscape.");
+      return;
+    }
+    const nodeIsIdea = node.data("is_idea");
+    const displayLabel = node.data("displayLabel");
+    const bg = node.style("background-color");
+    bus.emit("output:append", `Graph node is_idea: ${nodeIsIdea}`);
+    bus.emit("output:append", `Graph node displayLabel: ${displayLabel ?? ""}`);
+    bus.emit("output:append", `Graph node background-color: ${bg}`);
+    bus.emit(
+      "output:append",
+      `Graph node data: ${JSON.stringify({ is_idea: nodeIsIdea, displayLabel })}`
+    );
   });
 
   bus.on("graph:node:update", (payload = {}) => {
@@ -1124,6 +1136,10 @@ export function createGraphUI(bus, focusManager) {
       idea_level: level,
     }));
     cy.style().update();
+    if (DEBUG_GRAPH) {
+      console.log("is_idea data:", node.data("is_idea"));
+      console.log("bg after update:", node.style("background-color"));
+    }
   }
 
   async function refreshGraphNode(noteId, fallback = {}) {

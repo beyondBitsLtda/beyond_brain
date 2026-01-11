@@ -153,6 +153,28 @@ async function updateInsightStatus({ bus, client, user, noteId, isIdea }) {
     "output:append",
     isIdea ? `Nota ${noteId} marcada como ideia.` : `Nota ${noteId} removida de ideias.`
   );
+  const { data: verify, error: verifyErr } = await client
+    .from("notes")
+    .select("id,is_idea,subject")
+    .eq("id", noteId)
+    .eq("user_id", user.id)
+    .single();
+  if (verifyErr) {
+    if (reportUpdatePermissionError(bus, verifyErr)) return false;
+    bus.emit("output:append", `Erro ao verificar atualização: ${verifyErr.message}`);
+    return false;
+  }
+  if (verify?.is_idea !== isIdea) {
+    bus.emit("output:append", "UPDATE não persistiu (possível RLS/policy).");
+    bus.emit("graph:node:update", {
+      id: noteId,
+      is_idea: verify?.is_idea,
+      idea_level: data[0]?.idea_level,
+      level_set: data[0]?.level_set,
+      subject: verify?.subject ?? data[0]?.subject,
+    });
+    return false;
+  }
   const refreshed = await fetchNoteIdeaState({ client, user, noteId });
   bus.emit("graph:node:update", {
     id: noteId,
