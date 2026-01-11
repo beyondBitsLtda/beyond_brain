@@ -73,6 +73,133 @@ function formatRelationLabel(rel) {
   return `(${type}) ${rel.from_note_id} -> ${rel.to_note_id}`;
 }
 
+async function renderRelationsForNote({
+  bus,
+  client,
+  user,
+  noteId,
+  confirmModal,
+  relationSelectFields,
+}) {
+  const noteCheck = await ensureOwnedNotes(client, user.id, [noteId]);
+  if (!noteCheck.ok) {
+    bus.emit("output:append", "Nota não encontrada ou sem permissão.");
+    return;
+  }
+
+  const { data, error: relError } = await client
+    .from("note_relations")
+    .select(relationSelectFields)
+    .eq("user_id", user.id)
+    .or(`from_note_id.eq.${noteId},to_note_id.eq.${noteId}`)
+    .order("id", { ascending: false });
+
+  if (relError) {
+    bus.emit("output:append", `Erro ao listar relações na note_relations: ${relError.message}`);
+    return;
+  }
+
+  if (!data || data.length === 0) {
+    bus.emit("output:append", "Nenhuma relação encontrada para esta nota.");
+    return;
+  }
+
+  const openDeleteRelationModal = (rel, line) => {
+    confirmModal.open({
+      title: "Deletar relação?",
+      message: formatRelationLabel(rel),
+      confirmLabel: "Sim, deletar",
+      cancelLabel: "Não",
+      danger: true,
+      onConfirm: async () => {
+        const deleted = rel.id
+          ? await deleteRelationById({
+              bus,
+              client,
+              userId: user.id,
+              id: rel.id,
+            })
+          : await deleteRelationByComposite({
+              bus,
+              client,
+              userId: user.id,
+              rel,
+            });
+        if (!deleted) {
+          confirmModal.setError("Não foi possível deletar a relação.");
+          return false;
+        }
+        if (line && line.parentElement) {
+          line.parentElement.removeChild(line);
+        }
+        return true;
+      },
+    });
+  };
+
+  const lines = data.map((rel) => {
+    const other = rel.from_note_id === noteId ? rel.to_note_id : rel.from_note_id;
+    return {
+      rel,
+      text: `- (${rel.type}) ${other}`,
+    };
+  });
+
+  bus.emit("output:append", `Relações da nota ${noteId}:`);
+  lines.forEach(({ rel, text }) =>
+    bus.emit("output:append", {
+      text,
+      className: "terminal__line--clickable",
+      data: {
+        relFrom: rel.from_note_id,
+        relTo: rel.to_note_id,
+        relType: rel.type,
+        relId: rel.id,
+      },
+      onClick: () => {
+        bus.emit("output:append", `Detalhes da relação: ${formatRelationLabel(rel)}`);
+      },
+      actionPopover: {
+        items: [
+          {
+            label: "Deletar relação",
+            danger: true,
+            action: (line) => {
+              openDeleteRelationModal(rel, line);
+            },
+          },
+        ],
+      },
+    })
+  );
+}
+
+export async function listRelationsForNote(bus, noteId) {
+  const { client, error } = getSupabaseClient();
+  if (error || !client) {
+    bus.emit("output:append", "Supabase não configurado. Use auth --register ou auth para autenticar.");
+    return;
+  }
+
+  const user = await getAuthenticatedUser(bus, client);
+  if (!user) return;
+
+  const confirmModal = createConfirmModal(document.body);
+  const hasRelationId = await ensureRelationIdColumn(client, user.id);
+  const relationSelectFields = hasRelationId
+    ? "id,from_note_id,to_note_id,type"
+    : "from_note_id,to_note_id,type";
+
+  await renderRelationsForNote({
+    bus,
+    client,
+    user,
+    noteId,
+    confirmModal,
+    relationSelectFields,
+  });
+}
+
 function startConfirmPrompt(bus, { message, placeholder, onConfirm }) {
   bus.emit("output:append", message);
   bus.emit("input:placeholder", placeholder ?? "y");
@@ -601,7 +728,6 @@ export function relsCommand(bus) {
     const relationSelectFields = hasRelationId
       ? "id,from_note_id,to_note_id,type"
       : "from_note_id,to_note_id,type";
-
     const openDeleteRelationModal = (rel, line) => {
       confirmModal.open({
         title: "Deletar relação?",
@@ -641,62 +767,14 @@ export function relsCommand(bus) {
         bus.emit("output:append", "Uso: rels note \"uuid\"");
         return;
       }
-
-      const noteCheck = await ensureOwnedNotes(client, user.id, [noteId]);
-      if (!noteCheck.ok) {
-        bus.emit("output:append", "Nota não encontrada ou sem permissão.");
-        return;
-      }
-
-      const { data, error: relError } = await client
-        .from("note_relations")
-        .select(relationSelectFields)
-        .eq("user_id", user.id)
-        .or(`from_note_id.eq.${noteId},to_note_id.eq.${noteId}`)
-        .order("id", { ascending: false });
-
-      if (relError) {
-        bus.emit("output:append", `Erro ao listar relações na note_relations: ${relError.message}`);
-        return;
-      }
-
-      if (!data || data.length === 0) {
-        bus.emit("output:append", "Nenhuma relação encontrada para esta nota.");
-        return;
-      }
-
-      const lines = data.map((rel) => {
-        const other = rel.from_note_id === noteId ? rel.to_note_id : rel.from_note_id;
-        return {
-          rel,
-          text: `- (${rel.type}) ${other}`,
-        };
+      await renderRelationsForNote({
+        bus,
+        client,
+        user,
+        noteId,
+        confirmModal,
+        relationSelectFields,
       });
-
-      bus.emit("output:append", `Relações da nota ${noteId}:`);
-      lines.forEach(({ rel, text }) =>
-        bus.emit("output:append", {
-          text,
-          className: "terminal__line--clickable",
-          data: {
-            relFrom: rel.from_note_id,
-            relTo: rel.to_note_id,
-            relType: rel.type,
-            relId: rel.id,
-          },
-          contextMenu: {
-            items: [
-              {
-                label: "Deletar relação",
-                danger: true,
-                action: (line) => {
-                  openDeleteRelationModal(rel, line);
-                },
-              },
-            ],
-          },
-        })
-      );
       return;
     }
 
@@ -727,7 +805,10 @@ export function relsCommand(bus) {
           relType: rel.type,
           relId: rel.id,
         },
-        contextMenu: {
+        onClick: () => {
+          bus.emit("output:append", `Detalhes da relação: ${formatRelationLabel(rel)}`);
+        },
+        actionPopover: {
           items: [
             {
               label: "Deletar relação",
