@@ -1,11 +1,51 @@
 import { getSupabaseClient } from "../supabaseClient.js";
 import { getAuthenticatedUser } from "../notesService.js";
 import { getByIndex } from "../state/selectionRegistry.js";
-import { ensureNoteIdeaColumns } from "../schemaUtils.js";
+import { ensureNoteIdeaColumns, getNoteIdeaColumnAvailability } from "../schemaUtils.js";
 
 const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SELECTION_REGEX = /^#(\d+)$/;
+const DEBUG_GRAPH = true;
+
+function debugLog(...args) {
+  if (!DEBUG_GRAPH) return;
+  console.log("[level]", ...args);
+}
+
+function reportUpdatePermissionError(bus, error) {
+  if (!error) return false;
+  if (error.status === 401 || error.status === 403 || error.code === "42501") {
+    bus.emit("output:append", "Sem permissão para atualizar notes (UPDATE policy). Verifique RLS.");
+    return true;
+  }
+  return false;
+}
+
+async function fetchNoteIdeaState({ client, user, noteId }) {
+  const { hasLevelSet } = getNoteIdeaColumnAvailability();
+  const selectFields = [
+    "id",
+    "subject",
+    "is_idea",
+    "idea_level",
+    hasLevelSet ? "level_set" : null,
+  ]
+    .filter(Boolean)
+    .join(",");
+  const { data, error } = await client
+    .from("notes")
+    .select(selectFields)
+    .eq("id", noteId)
+    .eq("user_id", user.id)
+    .maybeSingle();
+  if (error) {
+    debugLog("fetchNoteIdeaState error", error);
+    return null;
+  }
+  debugLog("fetchNoteIdeaState data", data);
+  return data;
+}
 
 function parseKeyValuePairs(raw) {
   const pairs = {};
@@ -83,6 +123,11 @@ export function levelCommand(bus) {
       bus.emit("output:append", "Não foi possível remover nível sem as colunas de ideia.");
       return;
     }
+    const { hasLevelSet } = getNoteIdeaColumnAvailability();
+    if (!hasLevelSet) {
+      bus.emit("output:append", "Não foi possível remover nível sem a coluna level_set.");
+      return;
+    }
 
     const { data, error: updateError } = await client
       .from("notes")
@@ -92,6 +137,7 @@ export function levelCommand(bus) {
       .select("id,is_idea,idea_level,level_set,subject");
 
     if (updateError) {
+      if (reportUpdatePermissionError(bus, updateError)) return;
       bus.emit("output:append", `Erro ao remover nível: ${updateError.message}`);
       return;
     }
@@ -101,13 +147,15 @@ export function levelCommand(bus) {
       return;
     }
 
+    debugLog("levelCommand response", data[0]);
     bus.emit("output:append", "Nível removido.");
+    const refreshed = await fetchNoteIdeaState({ client, user, noteId });
     bus.emit("graph:node:update", {
       id: noteId,
-      is_idea: data[0]?.is_idea ?? false,
-      idea_level: data[0]?.idea_level,
-      level_set: data[0]?.level_set ?? false,
-      subject: data[0]?.subject,
+      is_idea: refreshed?.is_idea ?? data[0]?.is_idea ?? false,
+      idea_level: refreshed?.idea_level ?? data[0]?.idea_level,
+      level_set: refreshed?.level_set ?? data[0]?.level_set ?? false,
+      subject: refreshed?.subject ?? data[0]?.subject,
     });
   };
 }
