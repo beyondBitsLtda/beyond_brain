@@ -19,7 +19,7 @@ import {
 import { listRelationsForNote } from "./rels.js";
 import { createConfirmModal } from "../ui/confirmModal.js";
 import { createRelationModal } from "../ui/relationModal.js";
-import { ensureNoteIdeaColumns } from "../schemaUtils.js";
+import { ensureNoteIdeaColumns, getNoteIdeaColumnAvailability } from "../schemaUtils.js";
 const NOTE_FIELDS = [
   "id",
   "subject",
@@ -264,6 +264,7 @@ async function updateNoteIdea({ bus, noteId, isIdea, ideaLevel }) {
     return { ok: false };
   }
 
+  const { hasLevelSet } = getNoteIdeaColumnAvailability();
   const updates = isIdea
     ? {
         is_idea: true,
@@ -281,9 +282,27 @@ async function updateNoteIdea({ bus, noteId, isIdea, ideaLevel }) {
     .update(updates)
     .eq("id", noteId)
     .eq("user_id", user.id)
-    .select("id,is_idea,idea_level,level_set,subject");
+    .select(
+      [
+        "id",
+        "is_idea",
+        "idea_level",
+        hasLevelSet ? "level_set" : null,
+        "subject",
+      ]
+        .filter(Boolean)
+        .join(",")
+    );
 
   if (updateError) {
+    if (
+      updateError.status === 401 ||
+      updateError.status === 403 ||
+      updateError.code === "42501"
+    ) {
+      bus.emit("output:append", "Sem permissão para atualizar notes (UPDATE policy). Verifique RLS.");
+      return { ok: false };
+    }
     bus.emit("output:append", `Erro ao atualizar ideia: ${updateError.message}`);
     return { ok: false };
   }

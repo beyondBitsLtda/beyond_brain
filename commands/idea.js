@@ -1,11 +1,17 @@
 import { getSupabaseClient } from "../supabaseClient.js";
 import { getAuthenticatedUser } from "../notesService.js";
 import { getByIndex } from "../state/selectionRegistry.js";
-import { ensureNoteIdeaColumns } from "../schemaUtils.js";
+import { ensureNoteIdeaColumns, getNoteIdeaColumnAvailability } from "../schemaUtils.js";
 
 const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SELECTION_REGEX = /^#(\d+)$/;
+const DEBUG_GRAPH = true;
+
+function debugLog(...args) {
+  if (!DEBUG_GRAPH) return;
+  console.log("[idea]", ...args);
+}
 
 function parseKeyValuePairs(raw) {
   const pairs = {};
@@ -62,6 +68,40 @@ function formatDateTime(value) {
   ].join(" ");
 }
 
+function reportUpdatePermissionError(bus, error) {
+  if (!error) return false;
+  if (error.status === 401 || error.status === 403 || error.code === "42501") {
+    bus.emit("output:append", "Sem permissão para atualizar notes (UPDATE policy). Verifique RLS.");
+    return true;
+  }
+  return false;
+}
+
+async function fetchNoteIdeaState({ client, user, noteId }) {
+  const { hasLevelSet } = getNoteIdeaColumnAvailability();
+  const selectFields = [
+    "id",
+    "subject",
+    "is_idea",
+    "idea_level",
+    hasLevelSet ? "level_set" : null,
+  ]
+    .filter(Boolean)
+    .join(",");
+  const { data, error } = await client
+    .from("notes")
+    .select(selectFields)
+    .eq("id", noteId)
+    .eq("user_id", user.id)
+    .maybeSingle();
+  if (error) {
+    debugLog("fetchNoteIdeaState error", error);
+    return null;
+  }
+  debugLog("fetchNoteIdeaState data", data);
+  return data;
+}
+
 async function updateInsightStatus({ bus, client, user, noteId, isIdea }) {
   const hasIdeaColumns = await ensureNoteIdeaColumns({ client, userId: user.id, bus });
   if (!hasIdeaColumns) {
@@ -81,14 +121,25 @@ async function updateInsightStatus({ bus, client, user, noteId, isIdea }) {
         idea_marked_at: null,
       };
 
+  const { hasLevelSet } = getNoteIdeaColumnAvailability();
+  const selectFields = [
+    "id",
+    "is_idea",
+    "idea_level",
+    hasLevelSet ? "level_set" : null,
+    "subject",
+  ]
+    .filter(Boolean)
+    .join(",");
   const { data, error } = await client
     .from("notes")
     .update(updates)
     .eq("id", noteId)
     .eq("user_id", user.id)
-    .select("id,is_idea,idea_level,level_set,subject");
+    .select(selectFields);
 
   if (error) {
+    if (reportUpdatePermissionError(bus, error)) return false;
     bus.emit("output:append", `Erro ao atualizar ideia: ${error.message}`);
     return false;
   }
@@ -97,16 +148,18 @@ async function updateInsightStatus({ bus, client, user, noteId, isIdea }) {
     return false;
   }
 
+  debugLog("updateInsightStatus response", data[0]);
   bus.emit(
     "output:append",
     isIdea ? `Nota ${noteId} marcada como ideia.` : `Nota ${noteId} removida de ideias.`
   );
+  const refreshed = await fetchNoteIdeaState({ client, user, noteId });
   bus.emit("graph:node:update", {
     id: noteId,
-    is_idea: data[0]?.is_idea ?? isIdea,
-    idea_level: data[0]?.idea_level,
-    level_set: data[0]?.level_set,
-    subject: data[0]?.subject,
+    is_idea: refreshed?.is_idea ?? data[0]?.is_idea ?? isIdea,
+    idea_level: refreshed?.idea_level ?? data[0]?.idea_level,
+    level_set: refreshed?.level_set ?? data[0]?.level_set,
+    subject: refreshed?.subject ?? data[0]?.subject,
   });
   return true;
 }
@@ -115,6 +168,11 @@ async function updateLevelStatus({ bus, client, user, noteId, ideaLevel }) {
   const hasIdeaColumns = await ensureNoteIdeaColumns({ client, userId: user.id, bus });
   if (!hasIdeaColumns) {
     bus.emit("output:append", "Não foi possível atualizar níveis sem as colunas de ideia.");
+    return false;
+  }
+  const { hasLevelSet } = getNoteIdeaColumnAvailability();
+  if (!hasLevelSet) {
+    bus.emit("output:append", "Não foi possível atualizar níveis sem a coluna level_set.");
     return false;
   }
 
@@ -127,6 +185,7 @@ async function updateLevelStatus({ bus, client, user, noteId, ideaLevel }) {
     .select("id,is_idea,idea_level,level_set,subject");
 
   if (error) {
+    if (reportUpdatePermissionError(bus, error)) return false;
     bus.emit("output:append", `Erro ao atualizar nível: ${error.message}`);
     return false;
   }
@@ -135,13 +194,15 @@ async function updateLevelStatus({ bus, client, user, noteId, ideaLevel }) {
     return false;
   }
 
+  debugLog("updateLevelStatus response", data[0]);
   bus.emit("output:append", `Nível definido como ${level}.`);
+  const refreshed = await fetchNoteIdeaState({ client, user, noteId });
   bus.emit("graph:node:update", {
     id: noteId,
-    is_idea: data[0]?.is_idea ?? false,
-    idea_level: data[0]?.idea_level ?? level,
-    level_set: data[0]?.level_set ?? true,
-    subject: data[0]?.subject,
+    is_idea: refreshed?.is_idea ?? data[0]?.is_idea ?? false,
+    idea_level: refreshed?.idea_level ?? data[0]?.idea_level ?? level,
+    level_set: refreshed?.level_set ?? data[0]?.level_set ?? true,
+    subject: refreshed?.subject ?? data[0]?.subject,
   });
   return true;
 }
@@ -150,6 +211,11 @@ async function clearLevelStatus({ bus, client, user, noteId }) {
   const hasIdeaColumns = await ensureNoteIdeaColumns({ client, userId: user.id, bus });
   if (!hasIdeaColumns) {
     bus.emit("output:append", "Não foi possível remover nível sem as colunas de ideia.");
+    return false;
+  }
+  const { hasLevelSet } = getNoteIdeaColumnAvailability();
+  if (!hasLevelSet) {
+    bus.emit("output:append", "Não foi possível remover nível sem a coluna level_set.");
     return false;
   }
 
@@ -161,6 +227,7 @@ async function clearLevelStatus({ bus, client, user, noteId }) {
     .select("id,is_idea,idea_level,level_set,subject");
 
   if (error) {
+    if (reportUpdatePermissionError(bus, error)) return false;
     bus.emit("output:append", `Erro ao remover nível: ${error.message}`);
     return false;
   }
@@ -169,13 +236,15 @@ async function clearLevelStatus({ bus, client, user, noteId }) {
     return false;
   }
 
+  debugLog("clearLevelStatus response", data[0]);
   bus.emit("output:append", "Nível removido.");
+  const refreshed = await fetchNoteIdeaState({ client, user, noteId });
   bus.emit("graph:node:update", {
     id: noteId,
-    is_idea: data[0]?.is_idea ?? false,
-    idea_level: data[0]?.idea_level,
-    level_set: data[0]?.level_set ?? false,
-    subject: data[0]?.subject,
+    is_idea: refreshed?.is_idea ?? data[0]?.is_idea ?? false,
+    idea_level: refreshed?.idea_level ?? data[0]?.idea_level,
+    level_set: refreshed?.level_set ?? data[0]?.level_set ?? false,
+    subject: refreshed?.subject ?? data[0]?.subject,
   });
   return true;
 }
@@ -201,9 +270,19 @@ export function ideaCommand(bus) {
         return;
       }
 
+      const { hasLevelSet } = getNoteIdeaColumnAvailability();
+      const listFields = [
+        "id",
+        "subject",
+        "created_at",
+        "idea_level",
+        hasLevelSet ? "level_set" : null,
+      ]
+        .filter(Boolean)
+        .join(",");
       const { data, error: queryError } = await client
         .from("notes")
-        .select("id,subject,created_at,idea_level,level_set")
+        .select(listFields)
         .eq("user_id", user.id)
         .eq("is_idea", true)
         .order("created_at", { ascending: false });
