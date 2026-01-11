@@ -1104,6 +1104,153 @@ html[data-theme="xp"] .terminal__cursor {
   color: var(--bg);
 }
 
+.relation-modal {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 4;
+  padding: 1rem;
+}
+
+.relation-modal[hidden] {
+  display: none;
+}
+
+.relation-modal__backdrop {
+  position: absolute;
+  inset: 0;
+  background: color-mix(in srgb, var(--bg) 70%, transparent);
+}
+
+.relation-modal__panel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: min(460px, 92vw);
+  max-height: 75vh;
+  background: var(--window-bg, var(--bg));
+  color: var(--fg);
+  border: 1px solid var(--border);
+  box-shadow: 0 0 18px var(--glow);
+  font-family: var(--font-family);
+  pointer-events: auto;
+}
+
+.relation-modal__header {
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--border);
+  background: linear-gradient(
+    90deg,
+    var(--titlebar-bg-start, var(--bg)),
+    var(--titlebar-bg-end, var(--bg))
+  );
+  color: var(--titlebar-text, var(--fg));
+}
+
+.relation-modal__title {
+  margin: 0;
+  font-size: 1rem;
+  letter-spacing: 0.04em;
+}
+
+.relation-modal__body {
+  padding: 1rem;
+  display: grid;
+  gap: 0.75rem;
+}
+
+.relation-modal__row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.relation-modal__field {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.relation-modal__label {
+  font-size: 0.85rem;
+  opacity: 0.8;
+}
+
+.relation-modal__value {
+  font-weight: 600;
+}
+
+.relation-modal__select {
+  border: 1px solid var(--border);
+  background: var(--window-bg, var(--bg));
+  color: var(--fg);
+  padding: 0.35rem 0.5rem;
+  font: inherit;
+}
+
+.relation-modal__error {
+  margin: 0;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--danger, var(--accent));
+  color: var(--danger, var(--accent));
+  background: color-mix(in srgb, var(--danger, var(--accent)) 15%, transparent);
+  font-size: 0.85rem;
+}
+
+.relation-modal__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem 1rem;
+  border-top: 1px solid var(--border);
+}
+
+.relation-modal__button {
+  border: 1px solid var(--border);
+  background: var(--window-bg, var(--bg));
+  color: var(--fg);
+  padding: 0.35rem 0.75rem;
+  font: inherit;
+  cursor: pointer;
+}
+
+.relation-modal__button:focus-visible,
+.relation-modal__select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.relation-modal__button[disabled],
+.relation-modal__select[disabled] {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.relation-modal__button--primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--bg);
+}
+
+.graph-toast {
+  position: absolute;
+  bottom: 1rem;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 0.5rem 0.85rem;
+  border: 1px solid var(--border);
+  background: var(--window-bg, var(--bg));
+  color: var(--fg);
+  font-size: 0.85rem;
+  box-shadow: 0 0 12px var(--glow);
+  z-index: 5;
+}
+
+.graph-toast[hidden] {
+  display: none;
+}
+
 .mic-overlay {
   position: absolute;
   inset: 0;
