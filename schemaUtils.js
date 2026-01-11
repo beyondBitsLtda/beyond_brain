@@ -7,6 +7,19 @@ let warnedRelationWeight = false;
 let warnedRelationConfidence = false;
 let warnedNoteIdea = false;
 let warnedNoteLevelSet = false;
+let warnedNoteIdeaSql = false;
+
+const NOTE_IDEA_SQL = [
+  "alter table public.notes add column if not exists is_idea boolean not null default false;",
+  "alter table public.notes add column if not exists level_set boolean not null default false;",
+  "alter table public.notes add column if not exists idea_level integer not null default 1;",
+].join("\n");
+
+function reportNoteIdeaSql(bus) {
+  if (!bus || warnedNoteIdeaSql) return;
+  warnedNoteIdeaSql = true;
+  bus.emit("output:append", `Schema notes incompleto. Rode:\n${NOTE_IDEA_SQL}`);
+}
 
 export async function ensureRelationWeightColumn({ client, userId, bus } = {}) {
   if (relationWeightAvailable !== null) return relationWeightAvailable;
@@ -83,6 +96,7 @@ export async function ensureNoteIdeaColumns({ client, userId, bus } = {}) {
         "Aviso: coluna level_set não encontrada em notes. Atualize o schema para habilitar níveis."
       );
     }
+    reportNoteIdeaSql(bus);
     return true;
   }
 
@@ -95,6 +109,7 @@ export async function ensureNoteIdeaColumns({ client, userId, bus } = {}) {
       "Aviso: colunas de ideia não encontradas em notes. Rode a migração para habilitar nodos-ideia."
     );
   }
+  reportNoteIdeaSql(bus);
   return false;
 }
 

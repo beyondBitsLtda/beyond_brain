@@ -39,6 +39,7 @@ import { targetCommand } from "./commands/target.js";
 import { createNoteViewer } from "./ui/noteViewer.js";
 import { ideaCommand } from "./commands/idea.js";
 import { levelCommand } from "./commands/level.js";
+import { debugCommand } from "./commands/debug.js";
 
 const bus = createEventBus();
 const focusManager = createFocusManager(bus);
@@ -107,6 +108,8 @@ const commands = {
   ideas: ideaCommand(bus),
   LEVEL: levelCommand(bus),
   level: levelCommand(bus),
+  DEBUG: debugCommand(bus),
+  debug: debugCommand(bus),
   mic: () => micController.open(),
 };
 
