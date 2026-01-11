@@ -988,6 +988,122 @@ html[data-theme="xp"] .terminal__cursor {
   line-height: var(--line-height);
 }
 
+.confirm-modal {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 4;
+  padding: 1rem;
+}
+
+.confirm-modal[hidden] {
+  display: none;
+}
+
+.confirm-modal__backdrop {
+  position: absolute;
+  inset: 0;
+  background: color-mix(in srgb, var(--bg) 70%, transparent);
+}
+
+.confirm-modal__panel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: min(420px, 90vw);
+  max-height: 70vh;
+  background: var(--window-bg, var(--bg));
+  color: var(--fg);
+  border: 1px solid var(--border);
+  box-shadow: 0 0 18px var(--glow);
+  font-family: var(--font-family);
+  pointer-events: auto;
+}
+
+.confirm-modal__header {
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--border);
+  background: linear-gradient(
+    90deg,
+    var(--titlebar-bg-start, var(--bg)),
+    var(--titlebar-bg-end, var(--bg))
+  );
+  color: var(--titlebar-text, var(--fg));
+}
+
+.confirm-modal__title {
+  margin: 0;
+  font-size: 1rem;
+  letter-spacing: 0.04em;
+}
+
+.confirm-modal__body {
+  padding: 1rem;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.confirm-modal__message {
+  margin: 0;
+  font-weight: 600;
+}
+
+.confirm-modal__detail {
+  margin: 0;
+  opacity: 0.8;
+  font-size: 0.85rem;
+}
+
+.confirm-modal__warning {
+  margin: 0;
+  color: var(--danger, var(--accent));
+  font-size: 0.9rem;
+}
+
+.confirm-modal__error {
+  margin: 0;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--danger, var(--accent));
+  color: var(--danger, var(--accent));
+  background: color-mix(in srgb, var(--danger, var(--accent)) 15%, transparent);
+  font-size: 0.85rem;
+}
+
+.confirm-modal__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem 1rem;
+  border-top: 1px solid var(--border);
+}
+
+.confirm-modal__button {
+  border: 1px solid var(--border);
+  background: var(--window-bg, var(--bg));
+  color: var(--fg);
+  padding: 0.35rem 0.75rem;
+  font: inherit;
+  cursor: pointer;
+}
+
+.confirm-modal__button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.confirm-modal__button[disabled] {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.confirm-modal__button--danger {
+  background: var(--danger, var(--accent));
+  border-color: var(--danger, var(--accent));
+  color: var(--bg);
+}
+
 .mic-overlay {
   position: absolute;
   inset: 0;
