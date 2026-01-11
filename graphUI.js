@@ -3,6 +3,7 @@ import { clearSession } from "./sessionStore.js";
 import { getCurrentTheme } from "./themeManager.js";
 import { createGraphNoteWindow } from "./graphNoteWindow.js";
 import { createContextMenu } from "./ui/contextMenu.js";
+import { createConfirmModal } from "./ui/confirmModal.js";
 import { clearDeleteBySubjectState } from "./state/deleteBySubjectState.js";
 
 const LABEL_LIMIT = 24;
@@ -88,6 +89,7 @@ export function createGraphUI(bus, focusManager) {
   const detailCreated = document.getElementById("graph-detail-created");
   const noteWindow = createGraphNoteWindow(overlay);
   const contextMenu = createContextMenu();
+  const confirmModal = createConfirmModal(overlay);
 
   let cy = null;
   let isOpen = false;
@@ -643,16 +645,25 @@ export function createGraphUI(bus, focusManager) {
   function confirmDeleteNote(data) {
     if (!data?.id) return;
     clearDeleteBySubjectState();
-    startConfirmPrompt({
-      message: `Deletar nota "${data.subject ?? "(sem assunto)"}"? (y/n)`,
+    const subject = data.subject ?? "(sem assunto)";
+    const createdAt = data.created_at ? `Criada em ${data.created_at}` : "";
+    confirmModal.open({
+      title: "Deletar nota?",
+      message: subject,
+      detail: createdAt,
+      confirmLabel: "Sim, deletar",
+      cancelLabel: "Não",
+      danger: true,
       onConfirm: async () => {
         const clientResponse = getSupabaseClient();
         if (clientResponse.error || !clientResponse.client) {
-          bus.emit("output:append", "Supabase não configurado. Use auth --register ou auth para autenticar.");
-          return;
+          const message = "Supabase não configurado. Use auth --register ou auth para autenticar.";
+          confirmModal.setError(message);
+          bus.emit("output:append", message);
+          return false;
         }
         const user = await getAuthenticatedUser(clientResponse.client);
-        if (!user) return;
+        if (!user) return false;
         const { data: deleted, error } = await clientResponse.client
           .from("notes")
           .delete()
@@ -660,15 +671,24 @@ export function createGraphUI(bus, focusManager) {
           .eq("user_id", user.id)
           .select("id");
         if (error) {
-          bus.emit("output:append", `Erro ao deletar nota: ${error.message}`);
-          return;
+          confirmModal.setError(`Erro ao deletar nota: ${error.message}`);
+          return false;
         }
         if (!deleted || deleted.length === 0) {
-          bus.emit("output:append", "Nenhuma nota encontrada para deletar.");
-          return;
+          confirmModal.setError("Nenhuma nota encontrada para deletar.");
+          return false;
+        }
+        const node = cy?.getElementById(data.id);
+        if (node && node.length > 0) {
+          cy.remove(node.connectedEdges());
+          cy.remove(node);
+        }
+        if (detailId.textContent === data.id) {
+          clearDetails();
         }
         bus.emit("output:append", `Nota ${data.id} removida.`);
-        bus.emit("graph:refresh");
+        confirmModal.close();
+        return true;
       },
     });
   }
