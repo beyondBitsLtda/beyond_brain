@@ -10,7 +10,7 @@ import { pingCommand } from "./commands/ping.js";
 import { authCommand, bootstrapSession } from "./commands/auth.js";
 import { logoutCommand } from "./commands/logout.js";
 import { whoamiCommand } from "./commands/whoami.js";
-import { linkCommand, relsCommand, unlinkCommand } from "./commands/rels.js";
+import { linkCommand, relCommand, relsCommand, unlinkCommand } from "./commands/rels.js";
 import {
   deleteNoteCommand,
   confirmDeleteCommand,
@@ -37,6 +37,7 @@ import { editorCommand } from "./commands/editor.js";
 import { openCommand } from "./commands/open.js";
 import { targetCommand } from "./commands/target.js";
 import { createNoteViewer } from "./ui/noteViewer.js";
+import { ideaCommand } from "./commands/idea.js";
 
 const bus = createEventBus();
 const focusManager = createFocusManager(bus);
@@ -63,6 +64,8 @@ const commands = {
   UNLINK: unlinkCommand(bus),
   unlink: unlinkCommand(bus),
   rels: relsCommand(bus),
+  REL: relCommand(bus),
+  rel: relCommand(bus),
   INSERT: insertNoteCommand(bus),
   insert: insertNoteCommand(bus),
   SELECT: selectNoteCommand(bus, focusManager),
@@ -97,6 +100,10 @@ const commands = {
   open: openCommand(bus),
   target: targetCommand(bus),
   TARGET: targetCommand(bus),
+  IDEA: ideaCommand(bus),
+  idea: ideaCommand(bus),
+  IDEAS: ideaCommand(bus),
+  ideas: ideaCommand(bus),
   mic: () => micController.open(),
 };
 
