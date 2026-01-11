@@ -2,10 +2,11 @@ import { getSupabaseClient } from "./supabaseClient.js";
 import { clearSession } from "./sessionStore.js";
 import { getCurrentTheme } from "./themeManager.js";
 import { createGraphNoteWindow } from "./graphNoteWindow.js";
-import { createContextMenu } from "./ui/contextMenu.js";
+import { createActionPopover } from "./ui/actionPopover.js";
 import { createConfirmModal } from "./ui/confirmModal.js";
 import { createRelationModal } from "./ui/relationModal.js";
 import { clearDeleteBySubjectState } from "./state/deleteBySubjectState.js";
+import { listRelationsForNote } from "./commands/rels.js";
 
 const LABEL_LIMIT = 24;
 const DEPTH_MIN = 1;
@@ -89,7 +90,7 @@ export function createGraphUI(bus, focusManager) {
   const detailMoment = document.getElementById("graph-detail-moment");
   const detailCreated = document.getElementById("graph-detail-created");
   const noteWindow = createGraphNoteWindow(overlay);
-  const contextMenu = createContextMenu();
+  const actionPopover = createActionPopover();
   const confirmModal = createConfirmModal(document.body);
   const relationModal = createRelationModal(overlay);
   const connectToast = createGraphToast(overlay);
@@ -103,6 +104,7 @@ export function createGraphUI(bus, focusManager) {
   let noteSubjects = new Map();
   let relationCache = [];
   let relationIdColumnAvailable = null;
+  let relationCreatedAtAvailable = null;
   let connectMode = {
     active: false,
     fromNoteId: null,
@@ -266,25 +268,12 @@ export function createGraphUI(bus, focusManager) {
     }
   });
 
-  canvas?.addEventListener(
-    "contextmenu",
-    (event) => {
-      event.preventDefault();
-    },
-    { capture: true }
-  );
-
-  function suppressContextMenuEvent(originalEvent) {
-    if (!originalEvent) return;
-    if (typeof originalEvent.preventDefault === "function") {
-      originalEvent.preventDefault();
-    }
-    if (typeof originalEvent.stopPropagation === "function") {
-      originalEvent.stopPropagation();
-    }
-    if (typeof originalEvent.stopImmediatePropagation === "function") {
-      originalEvent.stopImmediatePropagation();
-    }
+  function openActionPopoverAtEvent(key, event, items, title) {
+    const { clientX = 0, clientY = 0 } = event?.originalEvent ?? event ?? {};
+    const terminalRect = document.querySelector(".terminal")?.getBoundingClientRect();
+    const x = terminalRect ? clientX - terminalRect.left : clientX;
+    const y = terminalRect ? clientY - terminalRect.top : clientY;
+    actionPopover.toggle(key, { x, y, items, title });
   }
 
   function showDetails(data) {
@@ -303,6 +292,33 @@ export function createGraphUI(bus, focusManager) {
     detailCreated.textContent = "";
     detailList.hidden = true;
     detailEmpty.hidden = false;
+  }
+
+  function findRelationInfo(data) {
+    if (!data) return null;
+    if (data.rel_id) {
+      return relationCache.find((rel) => rel.id === data.rel_id) ?? null;
+    }
+    return (
+      relationCache.find(
+        (rel) =>
+          rel.from_note_id === data.from_note_id &&
+          rel.to_note_id === data.to_note_id &&
+          (data.type ? rel.type === data.type : true)
+      ) ?? null
+    );
+  }
+
+  async function showRelationDetails(data) {
+    const relInfo = findRelationInfo(data);
+    const fromSubject = await resolveNoteSubject(data.from_note_id, data.from_note_id);
+    const toSubject = await resolveNoteSubject(data.to_note_id, data.to_note_id);
+    const createdAt = relInfo?.created_at ? ` | ${relInfo.created_at}` : "";
+    const type = data.type ?? relInfo?.type ?? "related";
+    bus.emit(
+      "output:append",
+      `Relação: (${type}) ${fromSubject} -> ${toSubject}${createdAt}`
+    );
   }
 
   function ensureCytoscape() {
@@ -360,51 +376,83 @@ export function createGraphUI(bus, focusManager) {
         handleConnectTarget(data);
         return;
       }
-      showDetails(data);
-      noteWindow.open(noteBodies.get(data.id) ?? "");
+      openActionPopoverAtEvent(
+        `node:${data.id}`,
+        event,
+        [
+          {
+            label: "Ver nota",
+            action: () => {
+              showDetails(data);
+              noteWindow.open(noteBodies.get(data.id) ?? "");
+            },
+          },
+          {
+            label: "Criar relação...",
+            action: () => {
+              startConnectMode({ fromNoteId: data.id, fromSubject: data.subject ?? "" });
+            },
+          },
+          {
+            label: "Consultar relações",
+            action: () => {
+              listRelationsForNote(bus, data.id);
+            },
+          },
+          {
+            label: "Deletar nota",
+            danger: true,
+            action: () => {
+              confirmDeleteNote(data);
+            },
+          },
+        ],
+        data.subject ?? "Nota"
+      );
     });
 
-    cy.on("cxttap", "node", (event) => {
+    cy.on("tap", "edge", (event) => {
       const data = event.target.data();
-      suppressContextMenuEvent(event.originalEvent);
-      const { clientX, clientY } = event.originalEvent ?? {};
-      contextMenu.open(clientX ?? 0, clientY ?? 0, [
-        {
-          label: "Abrir conteúdo",
-          action: () => {
-            showDetails(data);
-            noteWindow.open(noteBodies.get(data.id) ?? "");
+      openActionPopoverAtEvent(
+        `edge:${data.id}`,
+        event,
+        [
+          {
+            label: "Ver relação",
+            action: () => {
+              showRelationDetails(data);
+            },
           },
-        },
-        {
-          label: "Criar relação...",
-          action: () => {
-            startConnectMode({ fromNoteId: data.id, fromSubject: data.subject ?? "" });
+          {
+            label: "Abrir origem",
+            action: () => {
+              showDetails({
+                id: data.from_note_id,
+                subject: noteSubjects.get(data.from_note_id) ?? "",
+              });
+              noteWindow.open(noteBodies.get(data.from_note_id) ?? "");
+            },
           },
-        },
-        {
-          label: "Deletar nota",
-          danger: true,
-          action: () => {
-            confirmDeleteNote(data);
+          {
+            label: "Abrir destino",
+            action: () => {
+              showDetails({
+                id: data.to_note_id,
+                subject: noteSubjects.get(data.to_note_id) ?? "",
+              });
+              noteWindow.open(noteBodies.get(data.to_note_id) ?? "");
+            },
           },
-        },
-      ]);
-    });
-
-    cy.on("cxttap", "edge", (event) => {
-      const data = event.target.data();
-      suppressContextMenuEvent(event.originalEvent);
-      const { clientX, clientY } = event.originalEvent ?? {};
-      contextMenu.open(clientX ?? 0, clientY ?? 0, [
-        {
-          label: "Deletar relação",
-          danger: true,
-          action: () => {
-            confirmDeleteRelation(data, event.target);
+          {
+            label: "Deletar relação",
+            danger: true,
+            action: () => {
+              confirmDeleteRelation(data, event.target);
+            },
           },
-        },
-      ]);
+        ],
+        data.type ? `Relação: ${data.type}` : "Relação"
+      );
     });
 
     cy.on("tap", (event) => {
@@ -448,6 +496,23 @@ export function createGraphUI(bus, focusManager) {
     return true;
   }
 
+  async function ensureRelationCreatedAtColumn(client, userId) {
+    if (relationCreatedAtAvailable !== null) {
+      return relationCreatedAtAvailable;
+    }
+    const { error } = await client
+      .from("note_relations")
+      .select("created_at")
+      .eq("user_id", userId)
+      .limit(1);
+    if (error) {
+      relationCreatedAtAvailable = false;
+      return false;
+    }
+    relationCreatedAtAvailable = true;
+    return true;
+  }
+
   async function loadGraph(options = {}) {
     if (!isOpen) return;
     const fallbackFocus = focusManager?.getFocusNoteId?.() ?? null;
@@ -469,10 +534,16 @@ export function createGraphUI(bus, focusManager) {
     const user = await getAuthenticatedUser(clientResponse.client);
     if (!user) return;
 
-    const hasRelationId = await ensureRelationIdColumn(clientResponse.client, user.id);
+    const [hasRelationId, hasRelationCreatedAt] = await Promise.all([
+      ensureRelationIdColumn(clientResponse.client, user.id),
+      ensureRelationCreatedAtColumn(clientResponse.client, user.id),
+    ]);
     const relationSelectFields = hasRelationId
       ? "id,from_note_id,to_note_id,type"
       : "from_note_id,to_note_id,type";
+    const relationFields = hasRelationCreatedAt
+      ? `${relationSelectFields},created_at`
+      : relationSelectFields;
 
     const [notesResponse, relsResponse] = await Promise.all([
       clientResponse.client
@@ -482,7 +553,7 @@ export function createGraphUI(bus, focusManager) {
         .order("created_at", { ascending: false }),
       clientResponse.client
         .from("note_relations")
-        .select(relationSelectFields)
+        .select(relationFields)
         .eq("user_id", user.id),
     ]);
 
@@ -597,7 +668,7 @@ export function createGraphUI(bus, focusManager) {
       fromSubject: fromSubject ?? "",
     };
     setConnectHighlight(fromNoteId, true);
-    connectToast.show("Selecione o nó de destino ou pressione ESC para cancelar.");
+    connectToast.show("Clique no nó destino. ESC cancela.");
   }
 
   function cancelConnectMode() {
