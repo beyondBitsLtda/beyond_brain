@@ -15,11 +15,17 @@ const HELP_TEXT = `Comandos disponíveis:
 - DELETE NOTE subject="...": remove todas as notas com o subject (confirmação obrigatória)
 - CONFIRM DELETE subject="...": confirma deleção em massa por subject
 - open #N | open id="uuid": abre nota completa do último SELECT
-- LINK from="uuid|subject" to="uuid|subject" type="...": cria uma relação entre notas
+- LINK from="uuid|subject" to="uuid|subject" type="..." [weight=1..5]: cria uma relação entre notas
 - UNLINK from="uuid" to="uuid" [type="..."]: remove relação entre notas
 - UNLINK id="uuid": remove relação pelo id (se disponível)
+- REL WEIGHT from="..." to="..." type="..." set=1..5: ajusta peso de relação
+- REL REINFORCE from="..." to="..." type="...": reforça relação (+1)
 - rels: lista todas as relações do usuário
 - rels note "uuid": lista relações de uma nota específica
+- IDEA note "#N" | IDEA id="uuid": marca nota como ideia
+- IDEA off "#N" | IDEA off id="uuid": remove marcação de ideia
+- IDEA level "#N" set=1..3: ajusta nível de ideia
+- IDEAS: lista notas marcadas como ideia
 - graph: alterna o grafo das notas
 - graph note "uuid" [1|2]: foca no subgrafo da nota
 - focus "uuid" | focus clear: define ou limpa o modo foco

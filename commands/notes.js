@@ -19,7 +19,19 @@ import {
 import { listRelationsForNote } from "./rels.js";
 import { createConfirmModal } from "../ui/confirmModal.js";
 import { createRelationModal } from "../ui/relationModal.js";
-const NOTE_FIELDS = ["id", "subject", "moment", "body", "ref", "created_at"];
+import { ensureNoteIdeaColumns } from "../schemaUtils.js";
+const NOTE_FIELDS = [
+  "id",
+  "subject",
+  "moment",
+  "body",
+  "ref",
+  "created_at",
+  "is_idea",
+  "idea_level",
+  "idea_source",
+  "idea_marked_at",
+];
 const UPDATE_FIELDS = ["subject", "moment", "body", "ref"];
 const TABLE_MAX_WIDTH = 40;
 const BODY_SUMMARY_LIMIT = 140;
@@ -134,12 +146,10 @@ function formatShortId(id) {
 }
 
 function formatNoteTable(notes) {
-  const fields = ["idx", "id", "subject", "moment", "created_at", "body"];
+  const fields = ["idx", "subject", "created_at", "body"];
   const rows = notes.map((note, index) => ({
     idx: `#${index + 1}`,
-    id: formatShortId(note.id),
-    subject: note.subject ?? "",
-    moment: note.moment ?? "",
+    subject: note.is_idea ? `★ ${note.subject ?? ""}` : note.subject ?? "",
     created_at: formatDateTime(note.created_at ?? ""),
     body: normalizeSummary(note.body ?? ""),
   }));
@@ -153,11 +163,9 @@ function formatNoteTable(notes) {
 
   const maxWidths = {
     idx: 5,
-    id: ID_PREFIX_LENGTH,
-    subject: 24,
-    moment: 18,
+    subject: 28,
     created_at: 19,
-    body: 40,
+    body: 50,
   };
 
   const finalWidths = fields.map((field, index) =>
@@ -238,6 +246,60 @@ async function createRelationFromList({ bus, fromId, toId, type }) {
   bus.emit("output:append", `Relação criada: (${type}) ${fromId} -> ${toId}`);
   bus.emit("graph:refresh");
   return { ok: true };
+}
+
+async function updateNoteIdea({ bus, noteId, isIdea, ideaLevel }) {
+  const { client, error } = getSupabaseClient();
+  if (error || !client) {
+    bus.emit("output:append", "Supabase não configurado. Use auth --register ou auth para autenticar.");
+    return { ok: false };
+  }
+
+  const user = await getAuthenticatedUser(bus, client);
+  if (!user) return { ok: false };
+
+  const hasIdeaColumns = await ensureNoteIdeaColumns({ client, userId: user.id, bus });
+  if (!hasIdeaColumns) {
+    bus.emit("output:append", "Não foi possível atualizar ideias sem as colunas de ideia.");
+    return { ok: false };
+  }
+
+  const level = Number.isFinite(ideaLevel) ? ideaLevel : 1;
+  const updates = isIdea
+    ? {
+        is_idea: true,
+        idea_level: Math.min(Math.max(level, 1), 3),
+        idea_source: "manual",
+        idea_marked_at: new Date().toISOString(),
+      }
+    : {
+        is_idea: false,
+        idea_source: null,
+        idea_marked_at: null,
+      };
+
+  const { data, error: updateError } = await client
+    .from("notes")
+    .update(updates)
+    .eq("id", noteId)
+    .eq("user_id", user.id)
+    .select("id,is_idea,idea_level");
+
+  if (updateError) {
+    bus.emit("output:append", `Erro ao atualizar ideia: ${updateError.message}`);
+    return { ok: false };
+  }
+  if (!data || data.length === 0) {
+    bus.emit("output:append", "Nenhuma nota encontrada para atualizar.");
+    return { ok: false };
+  }
+
+  bus.emit(
+    "output:append",
+    isIdea ? `Nota ${noteId} marcada como ideia.` : `Nota ${noteId} removida de ideias.`
+  );
+  bus.emit("graph:refresh");
+  return { ok: true, note: data[0] };
 }
 
 function startRelationPickerFromNote(bus, note) {
@@ -334,6 +396,26 @@ function renderNotesOutput(bus, notes) {
               action: () => {
                 if (!note?.id) return;
                 listRelationsForNote(bus, note.id);
+              },
+            },
+            {
+              label: note?.is_idea ? "Remover ideia" : "Marcar como ideia",
+              action: async () => {
+                if (!note?.id) return;
+                const result = await updateNoteIdea({
+                  bus,
+                  noteId: note.id,
+                  isIdea: !note.is_idea,
+                  ideaLevel: note.idea_level ?? 1,
+                });
+                if (!result.ok) return;
+                const updatedList = getLastList().map((item) =>
+                  item.id === note.id
+                    ? { ...item, is_idea: !note.is_idea, idea_level: note.idea_level ?? 1 }
+                    : item
+                );
+                bus.emit("output:append", "Lista atualizada:");
+                renderNotesOutput(bus, updatedList);
               },
             },
             {
@@ -619,8 +701,17 @@ export function selectNoteCommand(bus, focusManager) {
     const user = await getAuthenticatedUser(bus, client);
     if (!user) return;
 
-    const requestedFields = resolveSelectFields(bus, parseSelectFields(raw));
+    let requestedFields = resolveSelectFields(bus, parseSelectFields(raw));
     if (!requestedFields) return;
+    const hasIdeaColumns = await ensureNoteIdeaColumns({ client, userId: user.id, bus });
+    if (!hasIdeaColumns) {
+      const ideaFields = ["is_idea", "idea_level", "idea_source", "idea_marked_at"];
+      const filtered = requestedFields.filter((field) => !ideaFields.includes(field));
+      if (filtered.length !== requestedFields.length) {
+        bus.emit("output:append", "Campos de ideia ignorados (colunas ausentes).");
+      }
+      requestedFields = filtered;
+    }
 
     const { conditions, error: whereError } = parseWhereClause(raw);
     if (whereError) {
@@ -636,7 +727,14 @@ export function selectNoteCommand(bus, focusManager) {
       }
     }
 
-    const baseFields = ["id", "subject", "moment", "body", "created_at"];
+    const baseFields = [
+      "id",
+      "subject",
+      "moment",
+      "body",
+      "created_at",
+      ...(hasIdeaColumns ? ["is_idea", "idea_level"] : []),
+    ];
     const selectFields = Array.from(new Set([...requestedFields, ...baseFields]));
 
     let query = client
