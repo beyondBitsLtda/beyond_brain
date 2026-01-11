@@ -84,6 +84,16 @@ export function createContextMenu() {
     }
   });
 
+  window.addEventListener("scroll", () => {
+    if (!openState) return;
+    close();
+  }, { capture: true });
+
+  window.addEventListener("resize", () => {
+    if (!openState) return;
+    close();
+  });
+
   instance = { open, close };
   return instance;
 }

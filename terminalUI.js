@@ -26,6 +26,11 @@ export function createTerminalUI(bus) {
   function appendLine(payload) {
     const line = document.createElement("div");
     line.className = "terminal__line";
+    const suppressContextMenuEvent = (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+    };
     if (typeof payload === "string") {
       line.textContent = payload;
     } else if (payload && typeof payload === "object") {
@@ -44,16 +49,28 @@ export function createTerminalUI(bus) {
         line.addEventListener("click", (event) => payload.onClick(event));
       }
       if (typeof payload.onContextMenu === "function") {
-        line.addEventListener("contextmenu", (event) => {
-          event.preventDefault();
-          payload.onContextMenu(event);
-        });
+        line.addEventListener(
+          "contextmenu",
+          (event) => {
+            suppressContextMenuEvent(event);
+            payload.onContextMenu(event);
+          },
+          { capture: true }
+        );
       }
       if (payload.contextMenu && Array.isArray(payload.contextMenu.items)) {
-        line.addEventListener("contextmenu", (event) => {
-          event.preventDefault();
-          contextMenu.open(event.clientX, event.clientY, payload.contextMenu.items);
-        });
+        line.addEventListener(
+          "contextmenu",
+          (event) => {
+            suppressContextMenuEvent(event);
+            const items = payload.contextMenu.items.map((item) => ({
+              ...item,
+              action: () => item.action?.(line),
+            }));
+            contextMenu.open(event.clientX, event.clientY, items);
+          },
+          { capture: true }
+        );
       }
     }
     output.appendChild(line);
@@ -268,6 +285,22 @@ export function createTerminalUI(bus) {
     terminal?.addEventListener("click", () => {
       focusInput();
     });
+
+    terminal?.addEventListener(
+      "contextmenu",
+      (event) => {
+        const target = event.target;
+        if (!target) return;
+        if (
+          target.closest(
+            "[data-note-id], [data-rel-from], #cy, .cytoscape-container, .terminal-output, .select-row, #output, .terminal__line"
+          )
+        ) {
+          event.preventDefault();
+        }
+      },
+      { capture: true }
+    );
 
     input.addEventListener("input", () => {
       resetHistoryNavigation();
