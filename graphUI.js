@@ -15,6 +15,7 @@ import {
 } from "./schemaUtils.js";
 
 const LABEL_LIMIT = 24;
+const DISPLAY_LABEL_LIMIT = 28;
 const DEPTH_MIN = 1;
 const DEPTH_MAX = 2;
 const WEIGHT_MIN = 1;
@@ -31,10 +32,10 @@ const EDGE_WEIGHT_STYLES = {
   5: { width: 5, opacity: 1, glow: 14 },
 };
 
-function shortLabel(text = "") {
+function shortLabel(text = "", limit = LABEL_LIMIT) {
   const trimmed = text.trim();
-  if (trimmed.length <= LABEL_LIMIT) return trimmed;
-  return `${trimmed.slice(0, LABEL_LIMIT - 1)}…`;
+  if (trimmed.length <= limit) return trimmed;
+  return `${trimmed.slice(0, limit - 1)}…`;
 }
 
 function parseDepth(value) {
@@ -54,13 +55,28 @@ function clampIdeaLevel(value) {
   return Math.min(Math.max(value, IDEA_LEVEL_MIN), IDEA_LEVEL_MAX);
 }
 
-function buildDisplayLabel(note) {
-  const shortLabelValue = shortLabel(note.subject ?? "");
-  if (note.level_set === true) {
-    const level = clampIdeaLevel(Number(note.idea_level ?? 1));
-    return `${level} · ${shortLabelValue}`;
+function buildDisplayLabel({ subject, level_set, idea_level }) {
+  const shortLabelValue = (subject || "").trim().slice(0, DISPLAY_LABEL_LIMIT);
+  if (level_set === true) {
+    return `${idea_level} · ${shortLabelValue}`;
   }
   return shortLabelValue;
+}
+
+function normalizeIsIdea(value) {
+  return value === true || value === "true" || value === 1;
+}
+
+function normalizeLevelSet(value) {
+  return value === true || value === "true" || value === 1;
+}
+
+function normalizeIdeaLevel(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return IDEA_LEVEL_MIN;
+  }
+  return numeric;
 }
 
 function debugLog(...args) {
@@ -91,14 +107,15 @@ function buildSubgraph(noteId, depth, relations) {
   return allowed;
 }
 
-function mapElements(notes, relations, allowedIds) {
+function mapElements(notes, relations, allowedIds, availability = {}) {
   const noteSet = new Set(allowedIds ?? notes.map((note) => note.id));
+  const { hasIdea, hasLevelSet } = availability;
   const nodes = notes
     .filter((note) => noteSet.has(note.id))
     .map((note) => {
-      const isIdea = Boolean(note.is_idea);
-      const levelSet = Boolean(note.level_set);
-      const ideaLevel = clampIdeaLevel(Number(note.idea_level ?? 1));
+      const isIdea = hasIdea ? normalizeIsIdea(note.is_idea) : false;
+      const levelSet = hasLevelSet ? normalizeLevelSet(note.level_set) : false;
+      const ideaLevel = clampIdeaLevel(normalizeIdeaLevel(note.idea_level ?? 1));
       const subject = note.subject ?? "";
       const nodeData = {
         id: note.id,
@@ -355,12 +372,12 @@ export function createGraphUI(bus, focusManager) {
         style: {
           "background-color": nodeBg,
           "border-color": nodeBorder,
-          "border-width": 1,
+          "border-width": 2,
           color: nodeFg,
           label: "data(displayLabel)",
           "font-size": 10,
           "text-wrap": "wrap",
-          "text-max-width": 80,
+          "text-max-width": 120,
         },
       },
       {
@@ -373,7 +390,7 @@ export function createGraphUI(bus, focusManager) {
           "background-color": insightNodeBg,
           color: insightNodeFg,
           "border-color": insightNodeBorder || nodeBorder,
-          "border-width": 2,
+          "border-width": 4,
           "shadow-color": ideaGlowColor,
           "shadow-opacity": 0.5,
         },
@@ -702,7 +719,7 @@ export function createGraphUI(bus, focusManager) {
         }),
         ensureNoteIdeaColumns({ client: clientResponse.client, userId: user.id, bus }),
       ]);
-    const { hasLevelSet } = getNoteIdeaColumnAvailability();
+    const { hasIdea, hasLevelSet } = getNoteIdeaColumnAvailability();
     const relationSelectFields = [
       hasRelationId ? "id" : null,
       "from_note_id",
@@ -716,8 +733,8 @@ export function createGraphUI(bus, focusManager) {
     const noteSelectFields = [
       "id",
       "subject",
-      "moment",
       "created_at",
+      "moment",
       "body",
       hasNoteIdea ? "is_idea" : null,
       hasNoteIdea ? "idea_level" : null,
@@ -750,6 +767,17 @@ export function createGraphUI(bus, focusManager) {
 
     const notes = notesResponse.data ?? [];
     const relations = relsResponse.data ?? [];
+    if (DEBUG_GRAPH) {
+      console.table(
+        notes.slice(0, 10).map((note) => ({
+          id: note.id,
+          subject: note.subject,
+          is_idea: note.is_idea,
+          idea_level: note.idea_level,
+          level_set: note.level_set,
+        }))
+      );
+    }
     if (notes.length > 0) {
       const sample = notes[0];
       debugLog("notes sample", {
@@ -779,13 +807,23 @@ export function createGraphUI(bus, focusManager) {
     }
     const allowed = focusNoteId ? buildSubgraph(focusNoteId, depth, relations) : null;
 
-    const elements = mapElements(notes, relations, allowed);
+    const elements = mapElements(notes, relations, allowed, { hasIdea: hasNoteIdea, hasLevelSet });
     const instance = ensureCytoscape();
     if (!instance) return;
 
     instance.elements().remove();
     instance.add([...elements.nodes, ...elements.edges]);
     instance.layout({ name: "cose", animate: false }).run();
+
+    if (DEBUG_GRAPH) {
+      const ideaNodes = instance.nodes("[is_idea = true]");
+      console.log("Idea nodes count:", ideaNodes.length);
+      if (ideaNodes.length) {
+        const sample = ideaNodes[0];
+        console.log("Sample idea node data:", sample.data());
+        console.log("Sample idea node bg:", sample.style("background-color"));
+      }
+    }
 
     clearDetails();
 
@@ -1070,13 +1108,13 @@ export function createGraphUI(bus, focusManager) {
     if (!cy || !noteId) return;
     const node = cy.getElementById(noteId);
     if (!node || node.length === 0) return;
-    const level = clampIdeaLevel(Number(ideaLevel ?? 1));
-    const levelIsSet = Boolean(levelSet);
+    const level = clampIdeaLevel(normalizeIdeaLevel(ideaLevel ?? 1));
+    const levelIsSet = normalizeLevelSet(levelSet);
     const nextSubject = subject ?? node.data("subject") ?? "";
     const shortLabelValue = shortLabel(nextSubject);
 
     node.data("subject", nextSubject);
-    node.data("is_idea", isIdea);
+    node.data("is_idea", normalizeIsIdea(isIdea));
     node.data("idea_level", level);
     node.data("level_set", levelIsSet);
     node.data("short_label", shortLabelValue);
@@ -1110,7 +1148,16 @@ export function createGraphUI(bus, focusManager) {
       userId: user.id,
       bus,
     });
-    if (!hasIdeaColumns) return;
+    if (!hasIdeaColumns) {
+      updateNodeIdeaState({
+        noteId,
+        isIdea: false,
+        ideaLevel: IDEA_LEVEL_MIN,
+        levelSet: false,
+        subject: fallback.subject,
+      });
+      return;
+    }
 
     const { hasLevelSet } = getNoteIdeaColumnAvailability();
     const selectFields = [
@@ -1133,9 +1180,9 @@ export function createGraphUI(bus, focusManager) {
       debugLog("refreshGraphNode error", error);
       updateNodeIdeaState({
         noteId,
-        isIdea: Boolean(fallback.is_idea),
+        isIdea: normalizeIsIdea(fallback.is_idea),
         ideaLevel: fallback.idea_level,
-        levelSet: fallback.level_set,
+        levelSet: normalizeLevelSet(fallback.level_set),
         subject: fallback.subject,
       });
       return;
@@ -1144,9 +1191,9 @@ export function createGraphUI(bus, focusManager) {
     debugLog("refreshGraphNode data", data);
     updateNodeIdeaState({
       noteId,
-      isIdea: Boolean(data?.is_idea ?? fallback.is_idea),
+      isIdea: normalizeIsIdea(data?.is_idea ?? fallback.is_idea),
       ideaLevel: data?.idea_level ?? fallback.idea_level,
-      levelSet: data?.level_set ?? fallback.level_set,
+      levelSet: normalizeLevelSet(data?.level_set ?? fallback.level_set),
       subject: data?.subject ?? fallback.subject,
     });
   }
