@@ -1,6 +1,7 @@
 import { getSupabaseClient } from "../supabaseClient.js";
 import { clearSession } from "../sessionStore.js";
 import { clearDeleteBySubjectState } from "../state/deleteBySubjectState.js";
+import { createConfirmModal } from "../ui/confirmModal.js";
 
 const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -125,6 +126,29 @@ async function deleteRelationByComposite({ bus, client, userId, rel }) {
   }
 
   const { data, error: deleteError } = await query.select("from_note_id");
+  if (deleteError) {
+    bus.emit("output:append", `Erro ao remover relação na note_relations: ${deleteError.message}`);
+    return false;
+  }
+
+  if (!data || data.length === 0) {
+    bus.emit("output:append", "Nenhuma relação encontrada para remover.");
+    return false;
+  }
+
+  bus.emit("output:append", `Relação removida (${data.length}).`);
+  bus.emit("graph:refresh");
+  return true;
+}
+
+async function deleteRelationById({ bus, client, userId, id }) {
+  const { data, error: deleteError } = await client
+    .from("note_relations")
+    .delete()
+    .eq("id", id)
+    .eq("user_id", userId)
+    .select("id");
+
   if (deleteError) {
     bus.emit("output:append", `Erro ao remover relação na note_relations: ${deleteError.message}`);
     return false;
@@ -572,6 +596,45 @@ export function relsCommand(bus) {
     const user = await getAuthenticatedUser(bus, client);
     if (!user) return;
 
+    const confirmModal = createConfirmModal(document.body);
+    const hasRelationId = await ensureRelationIdColumn(client, user.id);
+    const relationSelectFields = hasRelationId
+      ? "id,from_note_id,to_note_id,type"
+      : "from_note_id,to_note_id,type";
+
+    const openDeleteRelationModal = (rel, line) => {
+      confirmModal.open({
+        title: "Deletar relação?",
+        message: formatRelationLabel(rel),
+        confirmLabel: "Sim, deletar",
+        cancelLabel: "Não",
+        danger: true,
+        onConfirm: async () => {
+          const deleted = rel.id
+            ? await deleteRelationById({
+                bus,
+                client,
+                userId: user.id,
+                id: rel.id,
+              })
+            : await deleteRelationByComposite({
+                bus,
+                client,
+                userId: user.id,
+                rel,
+              });
+          if (!deleted) {
+            confirmModal.setError("Não foi possível deletar a relação.");
+            return false;
+          }
+          if (line && line.parentElement) {
+            line.parentElement.removeChild(line);
+          }
+          return true;
+        },
+      });
+    };
+
     if (args[0] === "note") {
       const noteId = parseQuotedValue(args[1] ?? "");
       if (!noteId) {
@@ -587,7 +650,7 @@ export function relsCommand(bus) {
 
       const { data, error: relError } = await client
         .from("note_relations")
-        .select("from_note_id,to_note_id,type")
+        .select(relationSelectFields)
         .eq("user_id", user.id)
         .or(`from_note_id.eq.${noteId},to_note_id.eq.${noteId}`)
         .order("id", { ascending: false });
@@ -616,27 +679,18 @@ export function relsCommand(bus) {
           text,
           className: "terminal__line--clickable",
           data: {
-            fromNoteId: rel.from_note_id,
-            toNoteId: rel.to_note_id,
+            relFrom: rel.from_note_id,
+            relTo: rel.to_note_id,
             relType: rel.type,
+            relId: rel.id,
           },
           contextMenu: {
             items: [
               {
                 label: "Deletar relação",
                 danger: true,
-                action: async () => {
-                  startConfirmPrompt(bus, {
-                    message: `Deletar relação ${formatRelationLabel(rel)}? (y/n)`,
-                    onConfirm: async () => {
-                      await deleteRelationByComposite({
-                        bus,
-                        client,
-                        userId: user.id,
-                        rel,
-                      });
-                    },
-                  });
+                action: (line) => {
+                  openDeleteRelationModal(rel, line);
                 },
               },
             ],
@@ -648,7 +702,7 @@ export function relsCommand(bus) {
 
     const { data, error: relError } = await client
       .from("note_relations")
-      .select("from_note_id,to_note_id,type")
+      .select(relationSelectFields)
       .eq("user_id", user.id)
       .order("id", { ascending: false });
 
@@ -668,27 +722,18 @@ export function relsCommand(bus) {
         text: formatRelation(rel),
         className: "terminal__line--clickable",
         data: {
-          fromNoteId: rel.from_note_id,
-          toNoteId: rel.to_note_id,
+          relFrom: rel.from_note_id,
+          relTo: rel.to_note_id,
           relType: rel.type,
+          relId: rel.id,
         },
         contextMenu: {
           items: [
             {
               label: "Deletar relação",
               danger: true,
-              action: async () => {
-                startConfirmPrompt(bus, {
-                  message: `Deletar relação ${formatRelationLabel(rel)}? (y/n)`,
-                  onConfirm: async () => {
-                    await deleteRelationByComposite({
-                      bus,
-                      client,
-                      userId: user.id,
-                      rel,
-                    });
-                  },
-                });
+              action: (line) => {
+                openDeleteRelationModal(rel, line);
               },
             },
           ],

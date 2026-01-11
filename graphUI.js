@@ -71,6 +71,7 @@ function mapElements(notes, relations, allowedIds) {
         type: rel.type ?? "",
         from_note_id: rel.from_note_id,
         to_note_id: rel.to_note_id,
+        rel_id: rel.id ?? null,
       },
     }));
 
@@ -89,7 +90,7 @@ export function createGraphUI(bus, focusManager) {
   const detailCreated = document.getElementById("graph-detail-created");
   const noteWindow = createGraphNoteWindow(overlay);
   const contextMenu = createContextMenu();
-  const confirmModal = createConfirmModal(overlay);
+  const confirmModal = createConfirmModal(document.body);
   const relationModal = createRelationModal(overlay);
   const connectToast = createGraphToast(overlay);
 
@@ -100,6 +101,8 @@ export function createGraphUI(bus, focusManager) {
   let edgePulseStart = null;
   let noteBodies = new Map();
   let noteSubjects = new Map();
+  let relationCache = [];
+  let relationIdColumnAvailable = null;
   let connectMode = {
     active: false,
     fromNoteId: null,
@@ -263,6 +266,27 @@ export function createGraphUI(bus, focusManager) {
     }
   });
 
+  canvas?.addEventListener(
+    "contextmenu",
+    (event) => {
+      event.preventDefault();
+    },
+    { capture: true }
+  );
+
+  function suppressContextMenuEvent(originalEvent) {
+    if (!originalEvent) return;
+    if (typeof originalEvent.preventDefault === "function") {
+      originalEvent.preventDefault();
+    }
+    if (typeof originalEvent.stopPropagation === "function") {
+      originalEvent.stopPropagation();
+    }
+    if (typeof originalEvent.stopImmediatePropagation === "function") {
+      originalEvent.stopImmediatePropagation();
+    }
+  }
+
   function showDetails(data) {
     detailId.textContent = data.id ?? "";
     detailSubject.textContent = data.subject ?? "";
@@ -342,6 +366,7 @@ export function createGraphUI(bus, focusManager) {
 
     cy.on("cxttap", "node", (event) => {
       const data = event.target.data();
+      suppressContextMenuEvent(event.originalEvent);
       const { clientX, clientY } = event.originalEvent ?? {};
       contextMenu.open(clientX ?? 0, clientY ?? 0, [
         {
@@ -369,13 +394,14 @@ export function createGraphUI(bus, focusManager) {
 
     cy.on("cxttap", "edge", (event) => {
       const data = event.target.data();
+      suppressContextMenuEvent(event.originalEvent);
       const { clientX, clientY } = event.originalEvent ?? {};
       contextMenu.open(clientX ?? 0, clientY ?? 0, [
         {
           label: "Deletar relação",
           danger: true,
           action: () => {
-            confirmDeleteRelation(data);
+            confirmDeleteRelation(data, event.target);
           },
         },
       ]);
@@ -405,6 +431,23 @@ export function createGraphUI(bus, focusManager) {
     return data.user;
   }
 
+  async function ensureRelationIdColumn(client, userId) {
+    if (relationIdColumnAvailable !== null) {
+      return relationIdColumnAvailable;
+    }
+    const { error } = await client
+      .from("note_relations")
+      .select("id")
+      .eq("user_id", userId)
+      .limit(1);
+    if (error) {
+      relationIdColumnAvailable = false;
+      return false;
+    }
+    relationIdColumnAvailable = true;
+    return true;
+  }
+
   async function loadGraph(options = {}) {
     if (!isOpen) return;
     const fallbackFocus = focusManager?.getFocusNoteId?.() ?? null;
@@ -426,6 +469,11 @@ export function createGraphUI(bus, focusManager) {
     const user = await getAuthenticatedUser(clientResponse.client);
     if (!user) return;
 
+    const hasRelationId = await ensureRelationIdColumn(clientResponse.client, user.id);
+    const relationSelectFields = hasRelationId
+      ? "id,from_note_id,to_note_id,type"
+      : "from_note_id,to_note_id,type";
+
     const [notesResponse, relsResponse] = await Promise.all([
       clientResponse.client
         .from("notes")
@@ -434,7 +482,7 @@ export function createGraphUI(bus, focusManager) {
         .order("created_at", { ascending: false }),
       clientResponse.client
         .from("note_relations")
-        .select("from_note_id,to_note_id,type")
+        .select(relationSelectFields)
         .eq("user_id", user.id),
     ]);
 
@@ -451,6 +499,7 @@ export function createGraphUI(bus, focusManager) {
     const relations = relsResponse.data ?? [];
     noteBodies = new Map(notes.map((note) => [note.id, note.body ?? ""]));
     noteSubjects = new Map(notes.map((note) => [note.id, note.subject ?? ""]));
+    relationCache = relations;
 
     if (notes.length === 0) {
       emptyState.hidden = false;
@@ -736,30 +785,6 @@ export function createGraphUI(bus, focusManager) {
     return { ok: true };
   }
 
-  function startConfirmPrompt({ message, onConfirm }) {
-    bus.emit("output:append", message);
-    bus.emit("input:placeholder", "y");
-    bus.emit("input:focus");
-    bus.emit("router:capture:start", {
-      echo: "normal",
-      handler: async (value) => {
-        bus.emit("router:capture:stop");
-        bus.emit("input:placeholder", "");
-        const normalized = value.trim().toLowerCase();
-        if (normalized === "y" || normalized === "yes") {
-          await onConfirm();
-          return;
-        }
-        bus.emit("output:append", "Operação cancelada.");
-      },
-      onCancel: () => {
-        bus.emit("router:capture:stop");
-        bus.emit("input:placeholder", "");
-        bus.emit("output:append", "Operação cancelada.");
-      },
-    });
-  }
-
   function confirmDeleteNote(data) {
     if (!data?.id) return;
     clearDeleteBySubjectState();
@@ -811,41 +836,71 @@ export function createGraphUI(bus, focusManager) {
     });
   }
 
-  function confirmDeleteRelation(data) {
+  function removeRelationFromCache(data) {
+    relationCache = relationCache.filter((rel) => {
+      if (data.rel_id && rel.id) {
+        return rel.id !== data.rel_id;
+      }
+      if (data.type) {
+        return !(
+          rel.from_note_id === data.from_note_id &&
+          rel.to_note_id === data.to_note_id &&
+          rel.type === data.type
+        );
+      }
+      return !(
+        rel.from_note_id === data.from_note_id &&
+        rel.to_note_id === data.to_note_id
+      );
+    });
+  }
+
+  function confirmDeleteRelation(data, edge) {
     if (!data?.from_note_id || !data?.to_note_id) return;
     clearDeleteBySubjectState();
-    startConfirmPrompt({
-      message: `Deletar relação (${data.type ?? "related"}) ${data.from_note_id} -> ${data.to_note_id}? (y/n)`,
+    confirmModal.open({
+      title: "Deletar relação?",
+      message: `(${data.type ?? "related"}) ${data.from_note_id} → ${data.to_note_id}`,
+      confirmLabel: "Sim, deletar",
+      cancelLabel: "Não",
+      danger: true,
       onConfirm: async () => {
         const clientResponse = getSupabaseClient();
         if (clientResponse.error || !clientResponse.client) {
-          bus.emit("output:append", "Supabase não configurado. Use auth --register ou auth para autenticar.");
-          return;
+          const message = "Supabase não configurado. Use auth --register ou auth para autenticar.";
+          confirmModal.setError(message);
+          bus.emit("output:append", message);
+          return false;
         }
         const user = await getAuthenticatedUser(clientResponse.client);
-        if (!user) return;
+        if (!user) return false;
 
-        let query = clientResponse.client
-          .from("note_relations")
-          .delete()
-          .eq("from_note_id", data.from_note_id)
-          .eq("to_note_id", data.to_note_id)
-          .eq("user_id", user.id);
-        if (data.type) {
-          query = query.eq("type", data.type);
+        let query = clientResponse.client.from("note_relations").delete().eq("user_id", user.id);
+        if (data.rel_id) {
+          query = query.eq("id", data.rel_id);
+        } else {
+          query = query.eq("from_note_id", data.from_note_id).eq("to_note_id", data.to_note_id);
+          if (data.type) {
+            query = query.eq("type", data.type);
+          }
         }
 
         const { data: deleted, error } = await query.select("from_note_id");
         if (error) {
-          bus.emit("output:append", `Erro ao remover relação na note_relations: ${error.message}`);
-          return;
+          confirmModal.setError(`Erro ao remover relação na note_relations: ${error.message}`);
+          return false;
         }
         if (!deleted || deleted.length === 0) {
-          bus.emit("output:append", "Nenhuma relação encontrada para remover.");
-          return;
+          confirmModal.setError("Nenhuma relação encontrada para remover.");
+          return false;
         }
+        const edgeElement = edge ?? cy?.getElementById(data.id);
+        if (edgeElement && edgeElement.length > 0) {
+          cy.remove(edgeElement);
+        }
+        removeRelationFromCache(data);
         bus.emit("output:append", `Relação removida (${deleted.length}).`);
-        bus.emit("graph:refresh");
+        return true;
       },
     });
   }

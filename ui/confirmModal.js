@@ -2,6 +2,9 @@ let instance = null;
 
 export function createConfirmModal(container = document.body) {
   if (instance) {
+    if (container && instance.element && instance.element.parentElement !== container) {
+      container.appendChild(instance.element);
+    }
     return instance;
   }
 
