@@ -29,6 +29,13 @@
   --idea-border-color: var(--accent);
   --idea-glow-color: var(--glow);
   --idea-badge-color: var(--accent);
+  --node-bg: var(--bg);
+  --node-fg: var(--fg);
+  --node-border: var(--border);
+  --insight-node-bg: #00ff7a;
+  --insight-node-fg: #001409;
+  --level-badge-bg: var(--bg);
+  --level-badge-fg: var(--fg);
 }
 
 :root[data-theme="matrix"] {

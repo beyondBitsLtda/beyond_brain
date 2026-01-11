@@ -88,7 +88,7 @@ async function updateNoteIdea({ bus, client, user, noteId, isIdea, ideaLevel }) 
     .update(updates)
     .eq("id", noteId)
     .eq("user_id", user.id)
-    .select("id");
+    .select("id,is_idea,idea_level,subject");
 
   if (error) {
     bus.emit("output:append", `Erro ao atualizar ideia: ${error.message}`);
@@ -103,7 +103,14 @@ async function updateNoteIdea({ bus, client, user, noteId, isIdea, ideaLevel }) 
     "output:append",
     isIdea ? `Nota ${noteId} marcada como ideia.` : `Nota ${noteId} removida de ideias.`
   );
-  bus.emit("graph:refresh");
+  bus.emit("graph:node:update", {
+    id: noteId,
+    is_idea: data[0]?.is_idea ?? isIdea,
+    idea_level: isIdea
+      ? data[0]?.idea_level ?? updates.idea_level
+      : null,
+    subject: data[0]?.subject,
+  });
   return true;
 }
 

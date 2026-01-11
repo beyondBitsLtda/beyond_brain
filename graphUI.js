@@ -49,6 +49,20 @@ function clampIdeaLevel(value) {
   return Math.min(Math.max(value, IDEA_LEVEL_MIN), IDEA_LEVEL_MAX);
 }
 
+function buildDisplayLabel({ shortLabel: shortLabelValue, isIdea, ideaLevel }) {
+  const pieces = [];
+  if (isIdea) {
+    pieces.push("★");
+  }
+  if (ideaLevel) {
+    pieces.push(`${ideaLevel} ·`);
+  }
+  if (pieces.length > 0) {
+    return `${pieces.join(" ")} ${shortLabelValue}`;
+  }
+  return shortLabelValue;
+}
+
 function buildSubgraph(noteId, depth, relations) {
   const allowed = new Set([noteId]);
   let frontier = new Set([noteId]);
@@ -76,17 +90,29 @@ function mapElements(notes, relations, allowedIds) {
   const noteSet = new Set(allowedIds ?? notes.map((note) => note.id));
   const nodes = notes
     .filter((note) => noteSet.has(note.id))
-    .map((note) => ({
-      data: {
-        id: note.id,
-        label: `${note.is_idea ? "★ " : ""}${shortLabel(note.subject)}`,
-        subject: note.subject ?? "",
-        moment: note.moment ?? "",
-        created_at: note.created_at ?? "",
-        is_idea: Boolean(note.is_idea),
-        idea_level: note.is_idea ? clampIdeaLevel(Number(note.idea_level ?? 1)) : null,
-      },
-    }));
+    .map((note) => {
+      const isIdea = Boolean(note.is_idea);
+      const ideaLevel = isIdea ? clampIdeaLevel(Number(note.idea_level ?? 1)) : null;
+      const shortLabelValue = shortLabel(note.subject ?? "");
+      const levelLabel = ideaLevel ? String(ideaLevel) : "";
+      return {
+        data: {
+          id: note.id,
+          subject: note.subject ?? "",
+          moment: note.moment ?? "",
+          created_at: note.created_at ?? "",
+          is_idea: isIdea,
+          idea_level: ideaLevel,
+          level_label: levelLabel,
+          short_label: shortLabelValue,
+          display_label: buildDisplayLabel({
+            shortLabel: shortLabelValue,
+            isIdea,
+            ideaLevel: levelLabel,
+          }),
+        },
+      };
+    });
 
   const edges = relations
     .filter((rel) => noteSet.has(rel.from_note_id) && noteSet.has(rel.to_note_id))
@@ -160,16 +186,23 @@ export function createGraphUI(bus, focusManager) {
   function getThemeTokens() {
     const styles = getComputedStyle(document.documentElement);
     return {
-      bg: styles.getPropertyValue("--bg").trim() || "#000",
-      fg: styles.getPropertyValue("--fg").trim() || "#0f0",
-      border: styles.getPropertyValue("--border").trim() || "#0f0",
-      accent: styles.getPropertyValue("--accent").trim() || "#0f0",
-      edgeColor: styles.getPropertyValue("--edge-color").trim() || "#0f0",
-      edgeStrongColor: styles.getPropertyValue("--edge-strong-color").trim() || "#0f0",
-      edgeGlowColor: styles.getPropertyValue("--edge-glow-color").trim() || "rgba(0,255,0,0.4)",
-      ideaBorderColor: styles.getPropertyValue("--idea-border-color").trim() || "#0f0",
-      ideaGlowColor: styles.getPropertyValue("--idea-glow-color").trim() || "rgba(0,255,0,0.35)",
-      ideaBadgeColor: styles.getPropertyValue("--idea-badge-color").trim() || "#0f0",
+      bg: styles.getPropertyValue("--bg").trim(),
+      fg: styles.getPropertyValue("--fg").trim(),
+      border: styles.getPropertyValue("--border").trim(),
+      accent: styles.getPropertyValue("--accent").trim(),
+      nodeBg: styles.getPropertyValue("--node-bg").trim(),
+      nodeFg: styles.getPropertyValue("--node-fg").trim(),
+      nodeBorder: styles.getPropertyValue("--node-border").trim(),
+      insightNodeBg: styles.getPropertyValue("--insight-node-bg").trim(),
+      insightNodeFg: styles.getPropertyValue("--insight-node-fg").trim(),
+      levelBadgeBg: styles.getPropertyValue("--level-badge-bg").trim(),
+      levelBadgeFg: styles.getPropertyValue("--level-badge-fg").trim(),
+      edgeColor: styles.getPropertyValue("--edge-color").trim(),
+      edgeStrongColor: styles.getPropertyValue("--edge-strong-color").trim(),
+      edgeGlowColor: styles.getPropertyValue("--edge-glow-color").trim(),
+      ideaBorderColor: styles.getPropertyValue("--idea-border-color").trim(),
+      ideaGlowColor: styles.getPropertyValue("--idea-glow-color").trim(),
+      ideaBadgeColor: styles.getPropertyValue("--idea-badge-color").trim(),
     };
   }
 
@@ -261,6 +294,13 @@ export function createGraphUI(bus, focusManager) {
       bg,
       fg,
       border,
+      nodeBg,
+      nodeFg,
+      nodeBorder,
+      insightNodeBg,
+      insightNodeFg,
+      levelBadgeBg,
+      levelBadgeFg,
       accent,
       edgeColor,
       edgeStrongColor,
@@ -299,11 +339,11 @@ export function createGraphUI(bus, focusManager) {
       {
         selector: "node",
         style: {
-          "background-color": bg,
-          "border-color": border,
+          "background-color": nodeBg,
+          "border-color": nodeBorder,
           "border-width": 1,
-          color: fg,
-          label: "data(label)",
+          color: nodeFg,
+          label: "data(display_label)",
           "font-size": 10,
           "text-wrap": "wrap",
           "text-max-width": 80,
@@ -316,17 +356,27 @@ export function createGraphUI(bus, focusManager) {
       {
         selector: "node[is_idea]",
         style: {
-          "border-color": ideaBorderColor,
+          "background-color": insightNodeBg,
+          color: insightNodeFg,
+          "border-color": ideaBorderColor || nodeBorder,
+          "border-width": 2,
           "shadow-color": ideaGlowColor,
           "shadow-opacity": 0.5,
         },
       },
       {
+        selector: "node[idea_level]",
+        style: {
+          "text-outline-color": levelBadgeBg,
+          "text-outline-width": 2,
+          color: levelBadgeFg || nodeFg,
+        },
+      },
+      {
         selector: "node[is_idea][idea_level = 1]",
         style: {
-          "border-width": 2,
-          width: 32,
-          height: 32,
+          width: 34,
+          height: 34,
           "shadow-blur": 6,
           color: ideaBadgeColor || fg,
         },
@@ -334,9 +384,8 @@ export function createGraphUI(bus, focusManager) {
       {
         selector: "node[is_idea][idea_level = 2]",
         style: {
-          "border-width": 3,
-          width: 36,
-          height: 36,
+          width: 38,
+          height: 38,
           "shadow-blur": 10,
           color: ideaBadgeColor || fg,
         },
@@ -344,9 +393,8 @@ export function createGraphUI(bus, focusManager) {
       {
         selector: "node[is_idea][idea_level = 3]",
         style: {
-          "border-width": 4,
-          width: 40,
-          height: 40,
+          width: 42,
+          height: 42,
           "shadow-blur": 14,
           color: ideaBadgeColor || fg,
         },
@@ -772,6 +820,13 @@ export function createGraphUI(bus, focusManager) {
     loadGraph({ focusNoteId: focusManager?.getFocusNoteId?.() ?? null });
   });
 
+  bus.on("graph:node:update", (payload = {}) => {
+    if (!isOpen || !cy) return;
+    const { id, is_idea, idea_level, subject } = payload;
+    if (!id) return;
+    updateNodeIdeaState({ noteId: id, isIdea: Boolean(is_idea), ideaLevel: idea_level, subject });
+  });
+
   bus.on("connect:start", ({ fromNoteId, fromSubject } = {}) => {
     if (!fromNoteId) return;
     if (!isOpen) {
@@ -990,6 +1045,30 @@ export function createGraphUI(bus, focusManager) {
     return { ok: true };
   }
 
+  function updateNodeIdeaState({ noteId, isIdea, ideaLevel, subject }) {
+    if (!cy || !noteId) return;
+    const node = cy.getElementById(noteId);
+    if (!node || node.length === 0) return;
+    const level = isIdea ? clampIdeaLevel(Number(ideaLevel ?? 1)) : null;
+    const levelLabel = level ? String(level) : "";
+    const nextSubject = subject ?? node.data("subject") ?? "";
+    const shortLabelValue = shortLabel(nextSubject);
+
+    node.data("subject", nextSubject);
+    node.data("is_idea", isIdea);
+    node.data("idea_level", level);
+    node.data("level_label", levelLabel);
+    node.data("short_label", shortLabelValue);
+    node.data(
+      "display_label",
+      buildDisplayLabel({
+        shortLabel: shortLabelValue,
+        isIdea,
+        ideaLevel: levelLabel,
+      })
+    );
+  }
+
   async function updateNoteIdeaStatus({ noteId, isIdea, ideaLevel }) {
     if (!noteId) return;
     const clientResponse = getSupabaseClient();
@@ -1030,7 +1109,7 @@ export function createGraphUI(bus, focusManager) {
       .update(updates)
       .eq("id", noteId)
       .eq("user_id", user.id)
-      .select("id,is_idea,idea_level");
+      .select("id,is_idea,idea_level,subject");
 
     if (error) {
       bus.emit("output:append", `Erro ao atualizar ideia: ${error.message}`);
@@ -1046,7 +1125,12 @@ export function createGraphUI(bus, focusManager) {
       "output:append",
       isIdea ? `Nota ${noteId} marcada como ideia.` : `Nota ${noteId} removida de ideias.`
     );
-    bus.emit("graph:refresh");
+    updateNodeIdeaState({
+      noteId,
+      isIdea,
+      ideaLevel: data[0]?.idea_level ?? ideaLevel,
+      subject: data[0]?.subject,
+    });
   }
 
   function updateRelationCacheWeight(relData, weight) {
