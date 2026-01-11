@@ -401,6 +401,51 @@ body::after {
   color: var(--accent);
 }
 
+.context-menu {
+  position: fixed;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  min-width: 180px;
+  padding: 0.35rem;
+  gap: 0.25rem;
+  background: var(--window-bg, var(--bg));
+  color: var(--fg);
+  border: var(--border-width) solid var(--border);
+  box-shadow: 0 0 12px var(--glow);
+}
+
+.context-menu[hidden] {
+  display: none;
+}
+
+.context-menu__item {
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  padding: 0.35rem 0.5rem;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.context-menu__item:hover,
+.context-menu__item:focus-visible {
+  background: var(--accent);
+  color: var(--bg);
+}
+
+.context-menu__item--danger {
+  color: var(--danger, var(--accent));
+}
+
+.context-menu__item--danger:hover,
+.context-menu__item--danger:focus-visible {
+  background: var(--danger, var(--accent));
+  color: var(--bg);
+}
+
 .terminal__input-row {
   position: relative;
   display: flex;
