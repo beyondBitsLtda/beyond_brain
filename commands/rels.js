@@ -2,10 +2,16 @@ import { getSupabaseClient } from "../supabaseClient.js";
 import { clearSession } from "../sessionStore.js";
 import { clearDeleteBySubjectState } from "../state/deleteBySubjectState.js";
 import { createConfirmModal } from "../ui/confirmModal.js";
+import {
+  ensureRelationConfidenceColumn,
+  ensureRelationWeightColumn,
+} from "../schemaUtils.js";
 
 const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const selectionRegex = /^#(\d+)$/;
+const WEIGHT_MIN = 1;
+const WEIGHT_MAX = 5;
 const lastDisambiguation = {
   from: [],
   to: [],
@@ -21,12 +27,25 @@ function parseQuotedValue(value) {
 function parseKeyValuePairs(raw) {
   const payload = raw.replace(/^\s*\S+\s*/, "");
   const pairs = {};
-  const regex = /(\w+)="([^"]*)"/g;
+  const regex = /(\w+)=(\"[^\"]*\"|[^\s"]+)/g;
   let match = null;
   while ((match = regex.exec(payload)) !== null) {
-    pairs[match[1].toLowerCase()] = match[2].trim();
+    pairs[match[1].toLowerCase()] = parseQuotedValue(match[2]);
   }
   return pairs;
+}
+
+function clampWeight(value) {
+  if (!Number.isFinite(value)) return WEIGHT_MIN;
+  return Math.min(Math.max(value, WEIGHT_MIN), WEIGHT_MAX);
+}
+
+function parseWeight(value) {
+  if (value === undefined || value === null || value === "") return null;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return null;
+  if (parsed < WEIGHT_MIN || parsed > WEIGHT_MAX) return null;
+  return parsed;
 }
 
 async function getAuthenticatedUser(bus, client) {
@@ -65,12 +84,14 @@ async function ensureOwnedNotes(client, userId, noteIds) {
 }
 
 function formatRelation(rel) {
-  return `- (${rel.type}) ${rel.from_note_id} -> ${rel.to_note_id}`;
+  const weight = rel.weight ? ` [peso ${rel.weight}]` : "";
+  return `- (${rel.type}) ${rel.from_note_id} -> ${rel.to_note_id}${weight}`;
 }
 
 function formatRelationLabel(rel) {
   const type = rel.type ?? "related";
-  return `(${type}) ${rel.from_note_id} -> ${rel.to_note_id}`;
+  const weight = rel.weight ? ` | peso ${rel.weight}` : "";
+  return `(${type}) ${rel.from_note_id} -> ${rel.to_note_id}${weight}`;
 }
 
 async function renderRelationsForNote({
@@ -185,10 +206,16 @@ export async function listRelationsForNote(bus, noteId) {
   if (!user) return;
 
   const confirmModal = createConfirmModal(document.body);
-  const hasRelationId = await ensureRelationIdColumn(client, user.id);
+  const [hasRelationId, hasRelationWeight] = await Promise.all([
+    ensureRelationIdColumn(client, user.id),
+    ensureRelationWeightColumn({ client, userId: user.id, bus }),
+  ]);
   const relationSelectFields = hasRelationId
     ? "id,from_note_id,to_note_id,type"
     : "from_note_id,to_note_id,type";
+  const relationFields = hasRelationWeight
+    ? `${relationSelectFields},weight`
+    : relationSelectFields;
 
   await renderRelationsForNote({
     bus,
@@ -196,7 +223,7 @@ export async function listRelationsForNote(bus, noteId) {
     user,
     noteId,
     confirmModal,
-    relationSelectFields,
+    relationSelectFields: relationFields,
   });
 }
 
@@ -291,6 +318,81 @@ async function deleteRelationById({ bus, client, userId, id }) {
   return true;
 }
 
+async function updateRelationWeight({ bus, client, userId, rel, weight }) {
+  const hasWeight = await ensureRelationWeightColumn({ client, userId, bus });
+  if (!hasWeight) {
+    bus.emit("output:append", "Não foi possível atualizar peso sem a coluna weight.");
+    return false;
+  }
+
+  const normalizedWeight = clampWeight(weight);
+  let query = client.from("note_relations").update({ weight: normalizedWeight }).eq("user_id", userId);
+  if (rel.id) {
+    query = query.eq("id", rel.id);
+  } else {
+    query = query.eq("from_note_id", rel.from_note_id).eq("to_note_id", rel.to_note_id);
+    if (rel.type) {
+      query = query.eq("type", rel.type);
+    }
+  }
+
+  const { data, error } = await query.select("from_note_id,to_note_id,type,weight");
+  if (error) {
+    bus.emit("output:append", `Erro ao atualizar peso: ${error.message}`);
+    return false;
+  }
+  if (!data || data.length === 0) {
+    bus.emit("output:append", "Nenhuma relação encontrada para atualizar.");
+    return false;
+  }
+
+  bus.emit("output:append", `Peso atualizado para ${normalizedWeight}.`);
+  bus.emit("graph:refresh");
+  return true;
+}
+
+async function reinforceRelationWeight({ bus, client, userId, rel }) {
+  const hasWeight = await ensureRelationWeightColumn({ client, userId, bus });
+  if (!hasWeight) {
+    bus.emit("output:append", "Não foi possível reforçar peso sem a coluna weight.");
+    return false;
+  }
+
+  let query = client
+    .from("note_relations")
+    .select("id,weight,from_note_id,to_note_id,type")
+    .eq("user_id", userId);
+  if (rel.id) {
+    query = query.eq("id", rel.id);
+  } else {
+    query = query.eq("from_note_id", rel.from_note_id).eq("to_note_id", rel.to_note_id);
+    if (rel.type) {
+      query = query.eq("type", rel.type);
+    }
+  }
+
+  const { data, error } = await query.maybeSingle();
+  if (error) {
+    bus.emit("output:append", `Erro ao buscar relação: ${error.message}`);
+    return false;
+  }
+  if (!data) {
+    bus.emit("output:append", "Nenhuma relação encontrada para reforçar.");
+    return false;
+  }
+
+  const currentWeight = clampWeight(Number(data.weight ?? WEIGHT_MIN));
+  const nextWeight = clampWeight(currentWeight + 1);
+  const updated = await updateRelationWeight({
+    bus,
+    client,
+    userId,
+    rel: { id: data.id, from_note_id: data.from_note_id, to_note_id: data.to_note_id, type: data.type },
+    weight: nextWeight,
+  });
+  return updated;
+}
+
 function formatDisambiguationOption(option, index) {
   const createdAt = option.created_at ? ` (${option.created_at})` : "";
   return `[${index + 1}] ${option.subject}${createdAt}`;
@@ -338,6 +440,8 @@ async function createRelation({
   fromId,
   toId,
   type,
+  weight,
+  confidence,
   bus,
 }) {
   if (fromId === toId) {
@@ -354,9 +458,15 @@ async function createRelation({
     return;
   }
 
+  const hasWeight = await ensureRelationWeightColumn({ client, userId, bus });
+  const hasConfidence = confidence
+    ? await ensureRelationConfidenceColumn({ client, userId, bus })
+    : false;
+
+  const selectFields = hasWeight ? "id,weight" : "id";
   const { data: existing, error: existingError } = await client
     .from("note_relations")
-    .select("id")
+    .select(selectFields)
     .eq("from_note_id", fromId)
     .eq("to_note_id", toId)
     .eq("type", type)
@@ -370,18 +480,58 @@ async function createRelation({
   }
 
   if (existing) {
+    if (weight !== null && weight !== undefined && hasWeight) {
+      const currentWeight = clampWeight(Number(existing.weight ?? WEIGHT_MIN));
+      const nextWeight = clampWeight(Math.max(currentWeight, weight));
+      if (nextWeight !== currentWeight) {
+        const { error: updateError } = await client
+          .from("note_relations")
+          .update({ weight: nextWeight })
+          .eq("id", existing.id)
+          .eq("user_id", userId);
+        if (updateError) {
+          bus.emit("output:append", `Erro ao atualizar peso: ${updateError.message}`);
+          return;
+        }
+        bus.emit(
+          "output:append",
+          `Relação já existia. Peso atualizado de ${currentWeight} para ${nextWeight}.`
+        );
+        bus.emit("graph:refresh");
+        return;
+      }
+      bus.emit(
+        "output:append",
+        `Relação já existia. Peso mantido em ${currentWeight}.`
+      );
+      return;
+    }
+
+    if (weight !== null && weight !== undefined && !hasWeight) {
+      bus.emit("output:append", "Relação já existia. Peso ignorado (coluna weight ausente).");
+      return;
+    }
+
     bus.emit("output:append", "Essa relação já existe.");
     return;
   }
 
+  const payload = {
+    from_note_id: fromId,
+    to_note_id: toId,
+    type,
+    user_id: userId,
+  };
+  if (hasWeight) {
+    payload.weight = clampWeight(weight ?? WEIGHT_MIN);
+  }
+  if (hasConfidence) {
+    payload.confidence = confidence;
+  }
+
   const { error: insertError } = await client
     .from("note_relations")
-    .insert({
-      from_note_id: fromId,
-      to_note_id: toId,
-      type,
-      user_id: userId,
-    });
+    .insert(payload);
 
   if (insertError) {
     if (insertError.code === "23505") {
@@ -392,7 +542,11 @@ async function createRelation({
     return;
   }
 
-  bus.emit("output:append", `Relação criada: (${type}) ${fromId} -> ${toId}`);
+  const finalWeight = payload.weight ?? WEIGHT_MIN;
+  bus.emit(
+    "output:append",
+    `Relação criada: (${type}) ${fromId} -> ${toId} (peso ${finalWeight})`
+  );
   bus.emit("graph:refresh");
 }
 
@@ -525,6 +679,7 @@ export function linkCommand(bus) {
       }
 
       const type = pendingLink.type;
+      const weight = pendingLink.weight;
       pendingLink = null;
       await createRelation({
         client,
@@ -532,6 +687,7 @@ export function linkCommand(bus) {
         fromId,
         toId: selected.id,
         type,
+        weight,
         bus,
       });
       return;
@@ -541,11 +697,18 @@ export function linkCommand(bus) {
     const from = pairs.from?.trim();
     const to = pairs.to?.trim();
     const type = pairs.type?.trim();
+    const weightProvided = Object.prototype.hasOwnProperty.call(pairs, "weight");
+    const parsedWeight = parseWeight(pairs.weight);
+
+    if (weightProvided && parsedWeight === null) {
+      bus.emit("output:append", "Peso inválido. Use weight=1..5.");
+      return;
+    }
 
     if (!from || !to || !type) {
       bus.emit(
         "output:append",
-        "Uso: LINK from=\"uuid|subject\" to=\"uuid|subject\" type=\"...\""
+        "Uso: LINK from=\"uuid|subject\" to=\"uuid|subject\" type=\"...\" [weight=1..5]"
       );
       return;
     }
@@ -586,6 +749,7 @@ export function linkCommand(bus) {
             fromId: oldest.id,
             toId: newest.id,
             type,
+            weight: parsedWeight,
             bus,
           });
           return;
@@ -605,6 +769,7 @@ export function linkCommand(bus) {
           options: data,
           stage: "pick_from",
           fromSelectedId: null,
+          weight: parsedWeight,
         };
         return;
       }
@@ -636,6 +801,7 @@ export function linkCommand(bus) {
       fromId: resolvedFrom.id,
       toId: resolvedTo.id,
       type,
+      weight: parsedWeight,
       bus,
     });
   };
@@ -712,6 +878,82 @@ export function unlinkCommand(bus) {
   };
 }
 
+export function relCommand(bus) {
+  return async ({ raw = "" } = {}) => {
+    const normalized = raw.trim();
+    const match = normalized.match(/^rel\s+(\w+)/i);
+    if (!match) {
+      bus.emit(
+        "output:append",
+        "Uso: REL WEIGHT from=\"...\" to=\"...\" type=\"...\" set=1..5 | REL REINFORCE from=\"...\" to=\"...\" type=\"...\""
+      );
+      return;
+    }
+
+    const action = match[1].toLowerCase();
+    const pairs = parseKeyValuePairs(raw);
+    const id = pairs.id?.trim();
+    const from = pairs.from?.trim();
+    const to = pairs.to?.trim();
+    const type = pairs.type?.trim() || "related";
+
+    const { client, error } = getSupabaseClient();
+    if (error || !client) {
+      bus.emit("output:append", "Supabase não configurado. Use auth --register ou auth para autenticar.");
+      return;
+    }
+
+    const user = await getAuthenticatedUser(bus, client);
+    if (!user) return;
+
+    if (action === "reinforce") {
+      if (!id && (!from || !to)) {
+        bus.emit(
+          "output:append",
+          "Uso: REL REINFORCE from=\"...\" to=\"...\" type=\"...\" | REL REINFORCE id=\"uuid\""
+        );
+        return;
+      }
+      await reinforceRelationWeight({
+        bus,
+        client,
+        userId: user.id,
+        rel: id ? { id } : { from_note_id: from, to_note_id: to, type },
+      });
+      return;
+    }
+
+    if (action === "weight") {
+      const setValue = pairs.set ?? pairs.weight;
+      const parsedWeight = parseWeight(setValue);
+      if (parsedWeight === null) {
+        bus.emit("output:append", "Peso inválido. Use set=1..5.");
+        return;
+      }
+      if (!id && (!from || !to)) {
+        bus.emit(
+          "output:append",
+          "Uso: REL WEIGHT from=\"...\" to=\"...\" type=\"...\" set=1..5 | REL WEIGHT id=\"uuid\" set=1..5"
+        );
+        return;
+      }
+      await updateRelationWeight({
+        bus,
+        client,
+        userId: user.id,
+        rel: id ? { id } : { from_note_id: from, to_note_id: to, type },
+        weight: parsedWeight,
+      });
+      return;
+    }
+
+    bus.emit(
+      "output:append",
+      "Uso: REL WEIGHT from=\"...\" to=\"...\" type=\"...\" set=1..5 | REL REINFORCE from=\"...\" to=\"...\" type=\"...\""
+    );
+  };
+}
+
 export function relsCommand(bus) {
   return async ({ args = [], raw = "" } = {}) => {
     const { client, error } = getSupabaseClient();
@@ -724,10 +966,16 @@ export function relsCommand(bus) {
     if (!user) return;
 
     const confirmModal = createConfirmModal(document.body);
-    const hasRelationId = await ensureRelationIdColumn(client, user.id);
+    const [hasRelationId, hasRelationWeight] = await Promise.all([
+      ensureRelationIdColumn(client, user.id),
+      ensureRelationWeightColumn({ client, userId: user.id, bus }),
+    ]);
     const relationSelectFields = hasRelationId
       ? "id,from_note_id,to_note_id,type"
       : "from_note_id,to_note_id,type";
+    const relationFields = hasRelationWeight
+      ? `${relationSelectFields},weight`
+      : relationSelectFields;
     const openDeleteRelationModal = (rel, line) => {
       confirmModal.open({
         title: "Deletar relação?",
@@ -773,14 +1021,14 @@ export function relsCommand(bus) {
         user,
         noteId,
         confirmModal,
-        relationSelectFields,
+        relationSelectFields: relationFields,
       });
       return;
     }
 
     const { data, error: relError } = await client
       .from("note_relations")
-      .select(relationSelectFields)
+      .select(relationFields)
       .eq("user_id", user.id)
       .order("id", { ascending: false });
 
