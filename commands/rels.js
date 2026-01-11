@@ -684,7 +684,10 @@ export function relsCommand(bus) {
             relType: rel.type,
             relId: rel.id,
           },
-          contextMenu: {
+          onClick: () => {
+            bus.emit("output:append", `Detalhes da relação: ${formatRelationLabel(rel)}`);
+          },
+          actionPopover: {
             items: [
               {
                 label: "Deletar relação",
@@ -727,7 +730,10 @@ export function relsCommand(bus) {
           relType: rel.type,
           relId: rel.id,
         },
-        contextMenu: {
+        onClick: () => {
+          bus.emit("output:append", `Detalhes da relação: ${formatRelationLabel(rel)}`);
+        },
+        actionPopover: {
           items: [
             {
               label: "Deletar relação",

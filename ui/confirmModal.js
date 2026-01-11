@@ -47,6 +47,7 @@ export function createConfirmModal(container = document.body) {
   const confirmButton = modal.querySelector('[data-action="confirm"]');
   const cancelButton = modal.querySelector('[data-action="cancel"]');
   const backdrop = modal.querySelector(".confirm-modal__backdrop");
+  const panel = modal.querySelector(".confirm-modal__panel");
 
   let activeHandlers = {};
   let lastFocused = null;
@@ -149,16 +150,31 @@ export function createConfirmModal(container = document.body) {
   }
 
   modal.addEventListener("click", (event) => {
-    const target = event.target.closest("[data-action]");
-    if (!target) return;
-    const action = target.getAttribute("data-action");
-    if (action === "confirm") {
-      handleConfirm();
-    }
-    if (action === "cancel" || action === "backdrop") {
+    const target = event.target.closest('[data-action="backdrop"]');
+    if (target) {
       handleCancel();
     }
   });
+
+  if (panel) {
+    panel.addEventListener("pointerdown", (event) => {
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+    });
+    panel.addEventListener("click", (event) => {
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+      const target = event.target.closest("[data-action]");
+      if (!target) return;
+      const action = target.getAttribute("data-action");
+      if (action === "confirm") {
+        handleConfirm();
+      }
+      if (action === "cancel") {
+        handleCancel();
+      }
+    });
+  }
 
   modal.addEventListener("keydown", (event) => {
     if (modal.hidden) return;

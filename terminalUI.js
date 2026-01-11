@@ -1,5 +1,5 @@
 import { createCodeEditor } from "./ui/codeEditor.js";
-import { createContextMenu } from "./ui/contextMenu.js";
+import { createActionPopover } from "./ui/actionPopover.js";
 
 const WELCOME_LINES = [
   "Bem-vindo ao terminal Beyond Brain.",
@@ -21,16 +21,11 @@ export function createTerminalUI(bus) {
   let rafId = null;
   let editorActive = false;
   const codeEditor = createCodeEditor();
-  const contextMenu = createContextMenu();
+  const actionPopover = createActionPopover();
 
   function appendLine(payload) {
     const line = document.createElement("div");
     line.className = "terminal__line";
-    const suppressContextMenuEvent = (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      event.stopImmediatePropagation();
-    };
     if (typeof payload === "string") {
       line.textContent = payload;
     } else if (payload && typeof payload === "object") {
@@ -45,32 +40,32 @@ export function createTerminalUI(bus) {
           }
         });
       }
-      if (typeof payload.onClick === "function") {
-        line.addEventListener("click", (event) => payload.onClick(event));
-      }
-      if (typeof payload.onContextMenu === "function") {
-        line.addEventListener(
-          "contextmenu",
-          (event) => {
-            suppressContextMenuEvent(event);
-            payload.onContextMenu(event);
-          },
-          { capture: true }
-        );
-      }
-      if (payload.contextMenu && Array.isArray(payload.contextMenu.items)) {
-        line.addEventListener(
-          "contextmenu",
-          (event) => {
-            suppressContextMenuEvent(event);
-            const items = payload.contextMenu.items.map((item) => ({
+      const actionItems = payload.actionPopover?.items;
+      if (typeof payload.onClick === "function" || Array.isArray(actionItems)) {
+        line.addEventListener("click", (event) => {
+          if (Array.isArray(actionItems) && event.shiftKey) {
+            event.preventDefault();
+            event.stopPropagation();
+            const rect = line.getBoundingClientRect();
+            const items = actionItems.map((item) => ({
               ...item,
               action: () => item.action?.(line),
             }));
-            contextMenu.open(event.clientX, event.clientY, items);
-          },
-          { capture: true }
-        );
+            actionPopover.open({
+              anchorRect: {
+                top: rect.top,
+                right: rect.right,
+                left: rect.left,
+                bottom: rect.bottom,
+                width: rect.width,
+                height: rect.height,
+              },
+              items,
+            });
+            return;
+          }
+          payload.onClick?.(event);
+        });
       }
     }
     output.appendChild(line);
@@ -285,22 +280,6 @@ export function createTerminalUI(bus) {
     terminal?.addEventListener("click", () => {
       focusInput();
     });
-
-    terminal?.addEventListener(
-      "contextmenu",
-      (event) => {
-        const target = event.target;
-        if (!target) return;
-        if (
-          target.closest(
-            "[data-note-id], [data-rel-from], #cy, .cytoscape-container, .terminal-output, .select-row, #output, .terminal__line"
-          )
-        ) {
-          event.preventDefault();
-        }
-      },
-      { capture: true }
-    );
 
     input.addEventListener("input", () => {
       resetHistoryNavigation();
