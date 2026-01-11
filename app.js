@@ -37,8 +37,7 @@ import { editorCommand } from "./commands/editor.js";
 import { openCommand } from "./commands/open.js";
 import { targetCommand } from "./commands/target.js";
 import { createNoteViewer } from "./ui/noteViewer.js";
-import { ideaCommand } from "./commands/idea.js";
-import { levelCommand } from "./commands/level.js";
+import { removedCommand } from "./commands/removed.js";
 
 const bus = createEventBus();
 const focusManager = createFocusManager(bus);
@@ -101,12 +100,14 @@ const commands = {
   open: openCommand(bus),
   target: targetCommand(bus),
   TARGET: targetCommand(bus),
-  IDEA: ideaCommand(bus),
-  idea: ideaCommand(bus),
-  IDEAS: ideaCommand(bus),
-  ideas: ideaCommand(bus),
-  LEVEL: levelCommand(bus),
-  level: levelCommand(bus),
+  IDEA: removedCommand(bus),
+  idea: removedCommand(bus),
+  IDEAS: removedCommand(bus),
+  ideas: removedCommand(bus),
+  LEVEL: removedCommand(bus),
+  level: removedCommand(bus),
+  DEBUG: removedCommand(bus),
+  debug: removedCommand(bus),
   mic: () => micController.open(),
 };
 
