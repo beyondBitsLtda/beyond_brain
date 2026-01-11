@@ -1,11 +1,22 @@
 let instance = null;
 
+function resolveRoot() {
+  return (
+    document.querySelector("#terminalRoot") ||
+    document.querySelector(".terminal-shell") ||
+    document.querySelector("#app") ||
+    document.querySelector(".terminal") ||
+    document.body
+  );
+}
+
 function createPopoverElement() {
   const popover = document.createElement("div");
   popover.className = "action-popover";
   popover.setAttribute("role", "menu");
   popover.hidden = true;
-  document.body.appendChild(popover);
+  const root = resolveRoot();
+  root.appendChild(popover);
   return popover;
 }
 
@@ -17,30 +28,39 @@ function createTitleElement(text) {
   return title;
 }
 
-function positionPopover(popover, x, y) {
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(value, max));
+}
+
+function positionPopover(popover, x, y, rootRect) {
   const padding = 8;
   popover.style.left = `${x}px`;
   popover.style.top = `${y}px`;
   const rect = popover.getBoundingClientRect();
+  const containerWidth = rootRect?.width ?? window.innerWidth;
+  const containerHeight = rootRect?.height ?? window.innerHeight;
   let left = x;
   let top = y;
 
-  if (rect.right > window.innerWidth - padding) {
-    left = Math.max(padding, window.innerWidth - rect.width - padding);
+  if (top + rect.height > containerHeight - padding) {
+    const aboveTop = top - rect.height - 8;
+    if (aboveTop >= padding) {
+      top = aboveTop;
+    }
   }
-  if (rect.bottom > window.innerHeight - padding) {
-    top = Math.max(padding, window.innerHeight - rect.height - padding);
-  }
+
+  left = clamp(left, padding, containerWidth - rect.width - padding);
+  top = clamp(top, padding, containerHeight - rect.height - padding);
 
   popover.style.left = `${left}px`;
   popover.style.top = `${top}px`;
 }
 
-function resolvePosition({ anchorRect, x, y }) {
+function resolvePosition({ anchorRect, x, y, rootRect }) {
   if (anchorRect) {
     return {
-      x: anchorRect.right + 8,
-      y: anchorRect.top,
+      x: anchorRect.right - (rootRect?.left ?? 0) + 8,
+      y: anchorRect.top - (rootRect?.top ?? 0),
     };
   }
   return { x: x ?? 0, y: y ?? 0 };
@@ -99,8 +119,9 @@ export function createActionPopover() {
     popover.hidden = false;
     openState = true;
     currentKey = key ?? null;
-    const position = resolvePosition({ anchorRect, x, y });
-    positionPopover(popover, position.x, position.y);
+    const rootRect = popover.parentElement?.getBoundingClientRect();
+    const position = resolvePosition({ anchorRect, x, y, rootRect });
+    positionPopover(popover, position.x, position.y, rootRect);
 
     const handlePointerDown = (event) => {
       if (!openState) return;

@@ -50,20 +50,16 @@ export function createTerminalUI(bus) {
           if (Array.isArray(actionItems)) {
             event.preventDefault();
             event.stopPropagation();
-            const rect = line.getBoundingClientRect();
+            const terminalRect = terminal?.getBoundingClientRect();
+            const x = terminalRect ? event.clientX - terminalRect.left : event.clientX;
+            const y = terminalRect ? event.clientY - terminalRect.top : event.clientY;
             const items = actionItems.map((item) => ({
               ...item,
               action: () => item.action?.(line),
             }));
             actionPopover.toggle(actionKey ?? null, {
-              anchorRect: {
-                top: rect.top,
-                right: rect.right,
-                left: rect.left,
-                bottom: rect.bottom,
-                width: rect.width,
-                height: rect.height,
-              },
+              x,
+              y,
               title: actionTitle,
               items,
             });

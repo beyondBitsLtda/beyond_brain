@@ -401,13 +401,18 @@ body::after {
   color: var(--accent);
 }
 
+.terminal {
+  position: relative;
+}
+
 .context-menu,
 .action-popover {
-  position: fixed;
-  z-index: 5;
+  position: absolute;
+  z-index: 9999;
   display: flex;
   flex-direction: column;
   min-width: 180px;
+  max-width: min(280px, calc(100% - 16px));
   padding: 0.35rem;
   gap: 0.25rem;
   background: var(--window-bg, var(--bg));

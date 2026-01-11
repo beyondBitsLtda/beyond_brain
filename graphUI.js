@@ -270,7 +270,10 @@ export function createGraphUI(bus, focusManager) {
 
   function openActionPopoverAtEvent(key, event, items, title) {
     const { clientX = 0, clientY = 0 } = event?.originalEvent ?? event ?? {};
-    actionPopover.toggle(key, { x: clientX, y: clientY, items, title });
+    const terminalRect = document.querySelector(".terminal")?.getBoundingClientRect();
+    const x = terminalRect ? clientX - terminalRect.left : clientX;
+    const y = terminalRect ? clientY - terminalRect.top : clientY;
+    actionPopover.toggle(key, { x, y, items, title });
   }
 
   function showDetails(data) {
