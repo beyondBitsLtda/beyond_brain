@@ -1,6 +1,7 @@
 const HELP_TEXT = `Comandos disponíveis:
 - help: mostra esta ajuda
 - clear: limpa a tela
+- cancel: cancela operações pendentes (ex: deleção por subject, modo connect)
 - ping: testa a conexão com o Supabase
 - auth: faz login interativo (auth --register para criar conta)
 - logout: encerra a sessão atual
@@ -11,9 +12,12 @@ const HELP_TEXT = `Comandos disponíveis:
 - SELECT NOTE [FIELDS(...)] [WHERE ...] [LIMIT n]: lista notas
 - UPDATE NOTE id="..." SET field="...": atualiza nota
 - DELETE NOTE id="...": remove nota
+- DELETE NOTE subject="...": remove todas as notas com o subject (confirmação obrigatória)
+- CONFIRM DELETE subject="...": confirma deleção em massa por subject
 - open #N | open id="uuid": abre nota completa do último SELECT
 - LINK from="uuid|subject" to="uuid|subject" type="...": cria uma relação entre notas
-- UNLINK from="uuid" to="uuid": remove relação entre notas
+- UNLINK from="uuid" to="uuid" [type="..."]: remove relação entre notas
+- UNLINK id="uuid": remove relação pelo id (se disponível)
 - rels: lista todas as relações do usuário
 - rels note "uuid": lista relações de uma nota específica
 - graph: alterna o grafo das notas

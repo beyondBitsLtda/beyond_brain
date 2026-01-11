@@ -2,10 +2,13 @@ import { getSupabaseClient } from "./supabaseClient.js";
 import { clearSession } from "./sessionStore.js";
 import { getCurrentTheme } from "./themeManager.js";
 import { createGraphNoteWindow } from "./graphNoteWindow.js";
+import { createContextMenu } from "./ui/contextMenu.js";
+import { clearDeleteBySubjectState } from "./state/deleteBySubjectState.js";
 
 const LABEL_LIMIT = 24;
 const DEPTH_MIN = 1;
 const DEPTH_MAX = 2;
+const RELATION_TYPES = ["related", "ref", "expands", "contradicts"];
 
 function shortLabel(text = "") {
   const trimmed = text.trim();
@@ -65,6 +68,8 @@ function mapElements(notes, relations, allowedIds) {
         source: rel.from_note_id,
         target: rel.to_note_id,
         type: rel.type ?? "",
+        from_note_id: rel.from_note_id,
+        to_note_id: rel.to_note_id,
       },
     }));
 
@@ -82,6 +87,7 @@ export function createGraphUI(bus, focusManager) {
   const detailMoment = document.getElementById("graph-detail-moment");
   const detailCreated = document.getElementById("graph-detail-created");
   const noteWindow = createGraphNoteWindow(overlay);
+  const contextMenu = createContextMenu();
 
   let cy = null;
   let isOpen = false;
@@ -89,6 +95,11 @@ export function createGraphUI(bus, focusManager) {
   let edgePulseFrame = null;
   let edgePulseStart = null;
   let noteBodies = new Map();
+  let connectMode = {
+    active: false,
+    fromNoteId: null,
+    fromSubject: "",
+  };
 
   function getThemeTokens() {
     const styles = getComputedStyle(document.documentElement);
@@ -278,8 +289,53 @@ export function createGraphUI(bus, focusManager) {
 
     cy.on("tap", "node", (event) => {
       const data = event.target.data();
+      if (connectMode.active) {
+        handleConnectTarget(data);
+        return;
+      }
       showDetails(data);
       noteWindow.open(noteBodies.get(data.id) ?? "");
+    });
+
+    cy.on("cxttap", "node", (event) => {
+      const data = event.target.data();
+      const { clientX, clientY } = event.originalEvent ?? {};
+      contextMenu.open(clientX ?? 0, clientY ?? 0, [
+        {
+          label: "Abrir conteúdo",
+          action: () => {
+            showDetails(data);
+            noteWindow.open(noteBodies.get(data.id) ?? "");
+          },
+        },
+        {
+          label: "Criar relação...",
+          action: () => {
+            startConnectMode({ fromNoteId: data.id, fromSubject: data.subject ?? "" });
+          },
+        },
+        {
+          label: "Deletar nota",
+          danger: true,
+          action: () => {
+            confirmDeleteNote(data);
+          },
+        },
+      ]);
+    });
+
+    cy.on("cxttap", "edge", (event) => {
+      const data = event.target.data();
+      const { clientX, clientY } = event.originalEvent ?? {};
+      contextMenu.open(clientX ?? 0, clientY ?? 0, [
+        {
+          label: "Deletar relação",
+          danger: true,
+          action: () => {
+            confirmDeleteRelation(data);
+          },
+        },
+      ]);
     });
 
     cy.on("tap", (event) => {
@@ -401,6 +457,7 @@ export function createGraphUI(bus, focusManager) {
     isOpen = false;
     noteWindow.close();
     stopSteveEdgePulse();
+    cancelConnectMode();
   }
 
   function toggleGraph() {
@@ -421,6 +478,239 @@ export function createGraphUI(bus, focusManager) {
     if (!isOpen) return;
     loadGraph({ focusNoteId: focusManager?.getFocusNoteId?.() ?? null });
   });
+
+  bus.on("connect:start", ({ fromNoteId, fromSubject } = {}) => {
+    if (!fromNoteId) return;
+    if (!isOpen) {
+      openGraph(lastOptions);
+    }
+    startConnectMode({ fromNoteId, fromSubject });
+  });
+
+  bus.on("connect:cancel", () => {
+    cancelConnectMode();
+  });
+
+  bus.on("input:escape", () => {
+    if (connectMode.active) {
+      cancelConnectMode();
+    }
+  });
+
+  function startConnectMode({ fromNoteId, fromSubject }) {
+    connectMode = {
+      active: true,
+      fromNoteId,
+      fromSubject: fromSubject ?? "",
+    };
+    bus.emit(
+      "output:append",
+      "Selecione o nó de destino (clique) ou ESC para cancelar."
+    );
+  }
+
+  function cancelConnectMode() {
+    if (!connectMode.active) return;
+    connectMode = { active: false, fromNoteId: null, fromSubject: "" };
+    bus.emit("output:append", "Modo de conexão cancelado.");
+  }
+
+  function handleConnectTarget(targetData) {
+    if (!connectMode.active) return;
+    if (!targetData?.id) return;
+    if (connectMode.fromNoteId === targetData.id) {
+      bus.emit("output:append", "Selecione um nó diferente para criar a relação.");
+      return;
+    }
+    promptRelationType(connectMode.fromNoteId, targetData.id);
+  }
+
+  function promptRelationType(fromId, toId) {
+    const choices = RELATION_TYPES.join(", ");
+    bus.emit(
+      "output:append",
+      `Tipo da relação (${choices}). Enter para "related".`
+    );
+    bus.emit("input:placeholder", "related");
+    bus.emit("input:focus");
+    bus.emit("router:capture:start", {
+      echo: "normal",
+      handler: async (value) => {
+        bus.emit("router:capture:stop");
+        bus.emit("input:placeholder", "");
+        const normalized = value.trim().toLowerCase();
+        if (normalized === "cancel") {
+          cancelConnectMode();
+          return;
+        }
+        const type = normalized === "" ? "related" : normalized;
+        if (!RELATION_TYPES.includes(type)) {
+          bus.emit("output:append", `Tipo inválido. Use: ${choices}.`);
+          return;
+        }
+        await createRelation({ fromId, toId, type });
+        connectMode = { active: false, fromNoteId: null, fromSubject: "" };
+      },
+      onCancel: () => {
+        bus.emit("router:capture:stop");
+        bus.emit("input:placeholder", "");
+        cancelConnectMode();
+      },
+    });
+  }
+
+  async function createRelation({ fromId, toId, type }) {
+    const clientResponse = getSupabaseClient();
+    if (clientResponse.error || !clientResponse.client) {
+      bus.emit("output:append", "Supabase não configurado. Use auth --register ou auth para autenticar.");
+      return;
+    }
+
+    const user = await getAuthenticatedUser(clientResponse.client);
+    if (!user) return;
+
+    if (fromId === toId) {
+      bus.emit("output:append", "Não é permitido criar relação da nota com ela mesma.");
+      return;
+    }
+
+    const { data: existing, error: existingError } = await clientResponse.client
+      .from("note_relations")
+      .select("from_note_id")
+      .eq("from_note_id", fromId)
+      .eq("to_note_id", toId)
+      .eq("type", type)
+      .eq("user_id", user.id)
+      .limit(1)
+      .maybeSingle();
+
+    if (existingError) {
+      bus.emit("output:append", `Erro ao verificar relação na note_relations: ${existingError.message}`);
+      return;
+    }
+
+    if (existing) {
+      bus.emit("output:append", "Essa relação já existe.");
+      return;
+    }
+
+    const { error: insertError } = await clientResponse.client
+      .from("note_relations")
+      .insert({
+        from_note_id: fromId,
+        to_note_id: toId,
+        type,
+        user_id: user.id,
+      });
+
+    if (insertError) {
+      if (insertError.code === "23505") {
+        bus.emit("output:append", "Essa relação já existe.");
+        return;
+      }
+      bus.emit("output:append", `Erro ao criar relação na note_relations: ${insertError.message}`);
+      return;
+    }
+
+    bus.emit("output:append", `Relação criada: (${type}) ${fromId} -> ${toId}`);
+    bus.emit("graph:refresh");
+  }
+
+  function startConfirmPrompt({ message, onConfirm }) {
+    bus.emit("output:append", message);
+    bus.emit("input:placeholder", "y");
+    bus.emit("input:focus");
+    bus.emit("router:capture:start", {
+      echo: "normal",
+      handler: async (value) => {
+        bus.emit("router:capture:stop");
+        bus.emit("input:placeholder", "");
+        const normalized = value.trim().toLowerCase();
+        if (normalized === "y" || normalized === "yes") {
+          await onConfirm();
+          return;
+        }
+        bus.emit("output:append", "Operação cancelada.");
+      },
+      onCancel: () => {
+        bus.emit("router:capture:stop");
+        bus.emit("input:placeholder", "");
+        bus.emit("output:append", "Operação cancelada.");
+      },
+    });
+  }
+
+  function confirmDeleteNote(data) {
+    if (!data?.id) return;
+    clearDeleteBySubjectState();
+    startConfirmPrompt({
+      message: `Deletar nota "${data.subject ?? "(sem assunto)"}"? (y/n)`,
+      onConfirm: async () => {
+        const clientResponse = getSupabaseClient();
+        if (clientResponse.error || !clientResponse.client) {
+          bus.emit("output:append", "Supabase não configurado. Use auth --register ou auth para autenticar.");
+          return;
+        }
+        const user = await getAuthenticatedUser(clientResponse.client);
+        if (!user) return;
+        const { data: deleted, error } = await clientResponse.client
+          .from("notes")
+          .delete()
+          .eq("id", data.id)
+          .eq("user_id", user.id)
+          .select("id");
+        if (error) {
+          bus.emit("output:append", `Erro ao deletar nota: ${error.message}`);
+          return;
+        }
+        if (!deleted || deleted.length === 0) {
+          bus.emit("output:append", "Nenhuma nota encontrada para deletar.");
+          return;
+        }
+        bus.emit("output:append", `Nota ${data.id} removida.`);
+        bus.emit("graph:refresh");
+      },
+    });
+  }
+
+  function confirmDeleteRelation(data) {
+    if (!data?.from_note_id || !data?.to_note_id) return;
+    clearDeleteBySubjectState();
+    startConfirmPrompt({
+      message: `Deletar relação (${data.type ?? "related"}) ${data.from_note_id} -> ${data.to_note_id}? (y/n)`,
+      onConfirm: async () => {
+        const clientResponse = getSupabaseClient();
+        if (clientResponse.error || !clientResponse.client) {
+          bus.emit("output:append", "Supabase não configurado. Use auth --register ou auth para autenticar.");
+          return;
+        }
+        const user = await getAuthenticatedUser(clientResponse.client);
+        if (!user) return;
+
+        let query = clientResponse.client
+          .from("note_relations")
+          .delete()
+          .eq("from_note_id", data.from_note_id)
+          .eq("to_note_id", data.to_note_id)
+          .eq("user_id", user.id);
+        if (data.type) {
+          query = query.eq("type", data.type);
+        }
+
+        const { data: deleted, error } = await query.select("from_note_id");
+        if (error) {
+          bus.emit("output:append", `Erro ao remover relação na note_relations: ${error.message}`);
+          return;
+        }
+        if (!deleted || deleted.length === 0) {
+          bus.emit("output:append", "Nenhuma relação encontrada para remover.");
+          return;
+        }
+        bus.emit("output:append", `Relação removida (${deleted.length}).`);
+        bus.emit("graph:refresh");
+      },
+    });
+  }
 
   return { toggleGraph, openGraph, closeGraph, loadGraph };
 }

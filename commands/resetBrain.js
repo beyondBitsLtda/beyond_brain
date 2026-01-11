@@ -1,5 +1,6 @@
 import { getSupabaseClient } from "../supabaseClient.js";
 import { clearSession } from "../sessionStore.js";
+import { clearDeleteBySubjectState } from "../state/deleteBySubjectState.js";
 
 function finishCapture(bus) {
   bus.emit("router:capture:stop");
@@ -29,6 +30,8 @@ export function resetBrainCommand(bus) {
       bus.emit("output:append", "Uso: RESET BRAIN");
       return;
     }
+
+    clearDeleteBySubjectState();
 
     const { client, error } = getSupabaseClient();
     if (error || !client) {

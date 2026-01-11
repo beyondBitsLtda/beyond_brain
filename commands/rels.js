@@ -1,5 +1,6 @@
 import { getSupabaseClient } from "../supabaseClient.js";
 import { clearSession } from "../sessionStore.js";
+import { clearDeleteBySubjectState } from "../state/deleteBySubjectState.js";
 
 const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -9,6 +10,7 @@ const lastDisambiguation = {
   to: [],
 };
 let pendingLink = null;
+let relationIdColumnAvailable = null;
 
 function parseQuotedValue(value) {
   if (!value) return "";
@@ -63,6 +65,79 @@ async function ensureOwnedNotes(client, userId, noteIds) {
 
 function formatRelation(rel) {
   return `- (${rel.type}) ${rel.from_note_id} -> ${rel.to_note_id}`;
+}
+
+function formatRelationLabel(rel) {
+  const type = rel.type ?? "related";
+  return `(${type}) ${rel.from_note_id} -> ${rel.to_note_id}`;
+}
+
+function startConfirmPrompt(bus, { message, placeholder, onConfirm }) {
+  bus.emit("output:append", message);
+  bus.emit("input:placeholder", placeholder ?? "y");
+  bus.emit("input:focus");
+  bus.emit("router:capture:start", {
+    echo: "normal",
+    handler: async (value) => {
+      bus.emit("router:capture:stop");
+      bus.emit("input:placeholder", "");
+      const normalized = value.trim().toLowerCase();
+      if (normalized === "y" || normalized === "yes") {
+        await onConfirm();
+        return;
+      }
+      bus.emit("output:append", "Operação cancelada.");
+    },
+    onCancel: () => {
+      bus.emit("router:capture:stop");
+      bus.emit("input:placeholder", "");
+      bus.emit("output:append", "Operação cancelada.");
+    },
+  });
+}
+
+async function ensureRelationIdColumn(client, userId) {
+  if (relationIdColumnAvailable !== null) {
+    return relationIdColumnAvailable;
+  }
+  const { error } = await client
+    .from("note_relations")
+    .select("id")
+    .eq("user_id", userId)
+    .limit(1);
+  if (error) {
+    relationIdColumnAvailable = false;
+    return false;
+  }
+  relationIdColumnAvailable = true;
+  return true;
+}
+
+async function deleteRelationByComposite({ bus, client, userId, rel }) {
+  let query = client
+    .from("note_relations")
+    .delete()
+    .eq("from_note_id", rel.from_note_id)
+    .eq("to_note_id", rel.to_note_id)
+    .eq("user_id", userId);
+  if (rel.type) {
+    query = query.eq("type", rel.type);
+  }
+
+  const { data, error: deleteError } = await query.select("from_note_id");
+  if (deleteError) {
+    bus.emit("output:append", `Erro ao remover relação na note_relations: ${deleteError.message}`);
+    return false;
+  }
+
+  if (!data || data.length === 0) {
+    bus.emit("output:append", "Nenhuma relação encontrada para remover.");
+    return false;
+  }
+
+  bus.emit("output:append", `Relação removida (${data.length}).`);
+  bus.emit("graph:refresh");
+  return true;
 }
 
 function formatDisambiguationOption(option, index) {
@@ -427,38 +502,62 @@ export function unlinkCommand(bus) {
     if (!user) return;
 
     const pairs = parseKeyValuePairs(raw);
+    const id = pairs.id?.trim();
     const from = pairs.from?.trim();
     const to = pairs.to?.trim();
     const type = pairs.type?.trim();
 
+    clearDeleteBySubjectState();
+
+    if (id) {
+      const hasId = await ensureRelationIdColumn(client, user.id);
+      if (!hasId) {
+        bus.emit("output:append", "A coluna id não está disponível. Use UNLINK from=\"...\" to=\"...\".");
+        return;
+      }
+      startConfirmPrompt(bus, {
+        message: `Deletar relação ${id}? (y/n)`,
+        onConfirm: async () => {
+          const { data, error: deleteError } = await client
+            .from("note_relations")
+            .delete()
+            .eq("id", id)
+            .eq("user_id", user.id)
+            .select("id");
+
+          if (deleteError) {
+            bus.emit("output:append", `Erro ao remover relação na note_relations: ${deleteError.message}`);
+            return;
+          }
+
+          if (!data || data.length === 0) {
+            bus.emit("output:append", "Nenhuma relação encontrada para remover.");
+            return;
+          }
+
+          bus.emit("output:append", `Relação removida (${data.length}).`);
+          bus.emit("graph:refresh");
+        },
+      });
+      return;
+    }
+
     if (!from || !to) {
-      bus.emit("output:append", "Uso: UNLINK from=\"uuid\" to=\"uuid\"");
+      bus.emit("output:append", "Uso: UNLINK from=\"uuid\" to=\"uuid\" [type=\"...\"] | UNLINK id=\"uuid\"");
       return;
     }
 
-    let query = client
-      .from("note_relations")
-      .delete()
-      .eq("from_note_id", from)
-      .eq("to_note_id", to)
-      .eq("user_id", user.id);
-    if (type) {
-      query = query.eq("type", type);
-    }
-
-    const { data, error: deleteError } = await query.select("id");
-    if (deleteError) {
-      bus.emit("output:append", `Erro ao remover relação na note_relations: ${deleteError.message}`);
-      return;
-    }
-
-    if (!data || data.length === 0) {
-      bus.emit("output:append", "Nenhuma relação encontrada para remover.");
-      return;
-    }
-
-    bus.emit("output:append", `Relação removida (${data.length}).`);
-    bus.emit("graph:refresh");
+    startConfirmPrompt(bus, {
+      message: `Deletar relação (${type ?? "related"}) ${from} -> ${to}? (y/n)`,
+      onConfirm: async () => {
+        await deleteRelationByComposite({
+          bus,
+          client,
+          userId: user.id,
+          rel: { from_note_id: from, to_note_id: to, type },
+        });
+      },
+    });
   };
 }
 
@@ -505,11 +604,45 @@ export function relsCommand(bus) {
 
       const lines = data.map((rel) => {
         const other = rel.from_note_id === noteId ? rel.to_note_id : rel.from_note_id;
-        return `- (${rel.type}) ${other}`;
+        return {
+          rel,
+          text: `- (${rel.type}) ${other}`,
+        };
       });
 
       bus.emit("output:append", `Relações da nota ${noteId}:`);
-      lines.forEach((line) => bus.emit("output:append", line));
+      lines.forEach(({ rel, text }) =>
+        bus.emit("output:append", {
+          text,
+          className: "terminal__line--clickable",
+          data: {
+            fromNoteId: rel.from_note_id,
+            toNoteId: rel.to_note_id,
+            relType: rel.type,
+          },
+          contextMenu: {
+            items: [
+              {
+                label: "Deletar relação",
+                danger: true,
+                action: async () => {
+                  startConfirmPrompt(bus, {
+                    message: `Deletar relação ${formatRelationLabel(rel)}? (y/n)`,
+                    onConfirm: async () => {
+                      await deleteRelationByComposite({
+                        bus,
+                        client,
+                        userId: user.id,
+                        rel,
+                      });
+                    },
+                  });
+                },
+              },
+            ],
+          },
+        })
+      );
       return;
     }
 
@@ -530,6 +663,37 @@ export function relsCommand(bus) {
     }
 
     bus.emit("output:append", "Relações encontradas:");
-    data.map(formatRelation).forEach((line) => bus.emit("output:append", line));
+    data.forEach((rel) => {
+      bus.emit("output:append", {
+        text: formatRelation(rel),
+        className: "terminal__line--clickable",
+        data: {
+          fromNoteId: rel.from_note_id,
+          toNoteId: rel.to_note_id,
+          relType: rel.type,
+        },
+        contextMenu: {
+          items: [
+            {
+              label: "Deletar relação",
+              danger: true,
+              action: async () => {
+                startConfirmPrompt(bus, {
+                  message: `Deletar relação ${formatRelationLabel(rel)}? (y/n)`,
+                  onConfirm: async () => {
+                    await deleteRelationByComposite({
+                      bus,
+                      client,
+                      userId: user.id,
+                      rel,
+                    });
+                  },
+                });
+              },
+            },
+          ],
+        },
+      });
+    });
   };
 }

@@ -1,4 +1,5 @@
 import { createCodeEditor } from "./ui/codeEditor.js";
+import { createContextMenu } from "./ui/contextMenu.js";
 
 const WELCOME_LINES = [
   "Bem-vindo ao terminal Beyond Brain.",
@@ -20,6 +21,7 @@ export function createTerminalUI(bus) {
   let rafId = null;
   let editorActive = false;
   const codeEditor = createCodeEditor();
+  const contextMenu = createContextMenu();
 
   function appendLine(payload) {
     const line = document.createElement("div");
@@ -39,7 +41,19 @@ export function createTerminalUI(bus) {
         });
       }
       if (typeof payload.onClick === "function") {
-        line.addEventListener("click", payload.onClick);
+        line.addEventListener("click", (event) => payload.onClick(event));
+      }
+      if (typeof payload.onContextMenu === "function") {
+        line.addEventListener("contextmenu", (event) => {
+          event.preventDefault();
+          payload.onContextMenu(event);
+        });
+      }
+      if (payload.contextMenu && Array.isArray(payload.contextMenu.items)) {
+        line.addEventListener("contextmenu", (event) => {
+          event.preventDefault();
+          contextMenu.open(event.clientX, event.clientY, payload.contextMenu.items);
+        });
       }
     }
     output.appendChild(line);

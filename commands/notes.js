@@ -4,12 +4,19 @@ import {
   getBodyColumnMigrationHint,
   insertNote,
 } from "../notesService.js";
-import { clear, getByIndex, setList } from "../state/selectionRegistry.js";
+import { clear, getByIndex, getLastList, setList } from "../state/selectionRegistry.js";
+import {
+  clearDeleteBySubjectState,
+  getDeleteBySubjectState,
+  isDeleteBySubjectExpired,
+  setDeleteBySubjectState,
+} from "../state/deleteBySubjectState.js";
 const NOTE_FIELDS = ["id", "subject", "moment", "body", "ref", "created_at"];
 const UPDATE_FIELDS = ["subject", "moment", "body", "ref"];
 const TABLE_MAX_WIDTH = 40;
 const BODY_SUMMARY_LIMIT = 140;
 const ID_PREFIX_LENGTH = 8;
+const DELETE_PREVIEW_LIMIT = 5;
 
 function parseKeyValuePairs(raw) {
   const pairs = {};
@@ -112,11 +119,15 @@ function normalizeSummary(value, limit = BODY_SUMMARY_LIMIT) {
   return `${collapsed.slice(0, limit - 1)}…`;
 }
 
+function formatShortId(id) {
+  return String(id ?? "").slice(0, ID_PREFIX_LENGTH);
+}
+
 function formatNoteTable(notes) {
   const fields = ["idx", "id", "subject", "moment", "created_at", "body"];
   const rows = notes.map((note, index) => ({
     idx: `#${index + 1}`,
-    id: String(note.id ?? "").slice(0, ID_PREFIX_LENGTH),
+    id: formatShortId(note.id),
     subject: note.subject ?? "",
     moment: note.moment ?? "",
     created_at: formatDateTime(note.created_at ?? ""),
@@ -154,6 +165,94 @@ function formatNoteTable(notes) {
   );
 
   return { lines: [border, header, border, ...dataRows, border], rows };
+}
+
+function renderNotesOutput(bus, notes) {
+  setList(notes);
+  const { lines, rows } = formatNoteTable(notes);
+  lines.forEach((line, index) => {
+    const rowIndex = index - 3;
+    if (rowIndex >= 0 && rowIndex < rows.length) {
+      const note = notes[rowIndex];
+      bus.emit("output:append", {
+        text: line,
+        className: "terminal__line--clickable",
+        data: {
+          openIndex: rowIndex + 1,
+          noteId: note?.id,
+          idx: `#${rowIndex + 1}`,
+        },
+        onClick: () => {
+          const selected = getByIndex(rowIndex + 1);
+          if (selected) {
+            bus.emit("noteViewer:open", selected);
+          }
+        },
+        contextMenu: {
+          items: [
+            {
+              label: "Abrir",
+              action: () => {
+                const selected = getByIndex(rowIndex + 1);
+                if (selected) {
+                  bus.emit("noteViewer:open", selected);
+                }
+              },
+            },
+            {
+              label: "Criar relação...",
+              action: () => {
+                if (!note?.id) return;
+                bus.emit("connect:start", {
+                  fromNoteId: note.id,
+                  fromSubject: note.subject ?? "",
+                });
+              },
+            },
+            {
+              label: "Deletar nota",
+              danger: true,
+              action: async () => {
+                if (!note?.id) return;
+                const { client, error } = getSupabaseClient();
+                if (error || !client) {
+                  bus.emit(
+                    "output:append",
+                    "Supabase não configurado. Use auth --register ou auth para autenticar."
+                  );
+                  return;
+                }
+                const user = await getAuthenticatedUser(bus, client);
+                if (!user) return;
+                startConfirmPrompt(bus, {
+                  message: `Deletar nota "${note.subject ?? "(sem assunto)"}"? (y/n)`,
+                  onConfirm: async () => {
+                    const removed = await deleteNoteById({
+                      bus,
+                      client,
+                      userId: user.id,
+                      id: note.id,
+                    });
+                    if (!removed) return;
+                    const updatedList = getLastList().filter((item) => item.id !== note.id);
+                    if (updatedList.length === 0) {
+                      clear();
+                      bus.emit("output:append", "Nenhuma nota encontrada.");
+                      return;
+                    }
+                    bus.emit("output:append", "Lista atualizada:");
+                    renderNotesOutput(bus, updatedList);
+                  },
+                });
+              },
+            },
+          ],
+        },
+      });
+    } else {
+      bus.emit("output:append", line);
+    }
+  });
 }
 
 function resolveSelectFields(bus, fields) {
@@ -207,6 +306,121 @@ function applyWhereConditions(bus, query, conditions) {
   }
 
   return query;
+}
+
+function clearExpiredDeleteBySubject(bus) {
+  const state = getDeleteBySubjectState();
+  if (isDeleteBySubjectExpired(state)) {
+    clearDeleteBySubjectState();
+    bus.emit("output:append", "Confirmação expirada. Rode novamente o DELETE NOTE subject=\"...\".");
+    return true;
+  }
+  return false;
+}
+
+function startConfirmPrompt(bus, { message, placeholder, onConfirm }) {
+  bus.emit("output:append", message);
+  bus.emit("input:placeholder", placeholder ?? "y");
+  bus.emit("input:focus");
+  bus.emit("router:capture:start", {
+    echo: "normal",
+    handler: async (value) => {
+      bus.emit("router:capture:stop");
+      bus.emit("input:placeholder", "");
+      const normalized = value.trim().toLowerCase();
+      if (normalized === "y" || normalized === "yes") {
+        await onConfirm();
+        return;
+      }
+      bus.emit("output:append", "Operação cancelada.");
+    },
+    onCancel: () => {
+      bus.emit("router:capture:stop");
+      bus.emit("input:placeholder", "");
+      bus.emit("output:append", "Operação cancelada.");
+    },
+  });
+}
+
+async function deleteNoteById({ bus, client, userId, id }) {
+  clearDeleteBySubjectState();
+  const { data, error: deleteError } = await client
+    .from("notes")
+    .delete()
+    .eq("id", id)
+    .eq("user_id", userId)
+    .select("id");
+
+  if (deleteError) {
+    bus.emit("output:append", `Erro ao deletar nota: ${deleteError.message}`);
+    return false;
+  }
+
+  if (!data || data.length === 0) {
+    bus.emit("output:append", "Nenhuma nota encontrada para deletar.");
+    return false;
+  }
+
+  bus.emit("output:append", `Nota ${id} removida.`);
+  bus.emit("graph:refresh");
+  return true;
+}
+
+async function deleteRelationsForNotes({ bus, client, userId, noteIds }) {
+  if (!noteIds.length) return 0;
+  const ids = noteIds.join(",");
+  const { data, error } = await client
+    .from("note_relations")
+    .delete()
+    .eq("user_id", userId)
+    .or(`from_note_id.in.(${ids}),to_note_id.in.(${ids})`)
+    .select("from_note_id");
+
+  if (error) {
+    bus.emit("output:append", `Erro ao remover relações: ${error.message}`);
+    return 0;
+  }
+
+  return data?.length ?? 0;
+}
+
+async function handleDeleteBySubject({ bus, client, user, subject }) {
+  clearExpiredDeleteBySubject(bus);
+  clearDeleteBySubjectState();
+
+  const { data, error } = await client
+    .from("notes")
+    .select("id,subject,created_at")
+    .eq("subject", subject)
+    .eq("user_id", user.id)
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    bus.emit("output:append", `Erro ao buscar notas: ${error.message}`);
+    return;
+  }
+
+  if (!data || data.length === 0) {
+    bus.emit("output:append", `Nenhuma nota encontrada para subject "${subject}".`);
+    return;
+  }
+
+  const preview = data.slice(0, DELETE_PREVIEW_LIMIT);
+  bus.emit(
+    "output:append",
+    `Você está prestes a deletar ${data.length} notas com subject "${subject}". Isso é irreversível.`
+  );
+  bus.emit("output:append", "Preview:");
+  preview.forEach((note) => {
+    const created = formatDateTime(note.created_at ?? "");
+    bus.emit("output:append", `- ${created} | ${formatShortId(note.id)}`);
+  });
+  if (data.length > preview.length) {
+    bus.emit("output:append", `...e mais ${data.length - preview.length} notas.`);
+  }
+
+  bus.emit("output:append", `Digite: CONFIRM DELETE subject="${subject}"`);
+  setDeleteBySubjectState({ subject, noteIds: data.map((note) => note.id) });
 }
 
 export function insertNoteCommand(bus) {
@@ -317,26 +531,7 @@ export function selectNoteCommand(bus, focusManager) {
       return;
     }
 
-    setList(data);
-    const { lines, rows } = formatNoteTable(data);
-    lines.forEach((line, index) => {
-      const rowIndex = index - 3;
-      if (rowIndex >= 0 && rowIndex < rows.length) {
-        bus.emit("output:append", {
-          text: line,
-          className: "terminal__line--clickable",
-          data: { openIndex: rowIndex + 1 },
-          onClick: () => {
-            const note = getByIndex(rowIndex + 1);
-            if (note) {
-              bus.emit("noteViewer:open", note);
-            }
-          },
-        });
-      } else {
-        bus.emit("output:append", line);
-      }
-    });
+    renderNotesOutput(bus, data);
   };
 }
 
@@ -418,29 +613,111 @@ export function deleteNoteCommand(bus) {
     const user = await getAuthenticatedUser(bus, client);
     if (!user) return;
 
-    const id = parseKeyValuePairs(raw).id?.trim();
+    if (clearExpiredDeleteBySubject(bus)) {
+      return;
+    }
+
+    const pairs = parseKeyValuePairs(raw);
+    const subject = pairs.subject?.trim();
+    const id = pairs.id?.trim();
+
+    if (subject && !id) {
+      await handleDeleteBySubject({ bus, client, user, subject });
+      return;
+    }
+
+    clearDeleteBySubjectState();
+
     if (!id) {
-      bus.emit("output:append", "Uso: DELETE NOTE id=\"...\"");
+      bus.emit("output:append", "Uso: DELETE NOTE id=\"...\" | DELETE NOTE subject=\"...\"");
+      return;
+    }
+
+    startConfirmPrompt(bus, {
+      message: `Deletar nota ${id}? (y/n)`,
+      onConfirm: async () => {
+        await deleteNoteById({ bus, client, userId: user.id, id });
+      },
+    });
+  };
+}
+
+export function confirmDeleteCommand(bus) {
+  return async ({ raw = "" } = {}) => {
+    const normalized = raw.trim();
+    if (!normalized.toUpperCase().startsWith("CONFIRM DELETE")) {
+      bus.emit("output:append", "Uso: CONFIRM DELETE subject=\"...\"");
+      return;
+    }
+
+    const { client, error } = getSupabaseClient();
+    if (error || !client) {
+      bus.emit("output:append", "Supabase não configurado. Use auth --register ou auth para autenticar.");
+      return;
+    }
+
+    const user = await getAuthenticatedUser(bus, client);
+    if (!user) return;
+
+    const pairs = parseKeyValuePairs(raw);
+    const subject = pairs.subject?.trim();
+    if (!subject) {
+      bus.emit("output:append", "Uso: CONFIRM DELETE subject=\"...\"");
+      return;
+    }
+
+    const state = getDeleteBySubjectState();
+    if (!state.pending) {
+      bus.emit("output:append", "Nenhuma deleção pendente.");
+      return;
+    }
+
+    if (isDeleteBySubjectExpired(state)) {
+      clearDeleteBySubjectState();
+      bus.emit("output:append", "Confirmação expirada. Rode novamente o DELETE NOTE subject=\"...\".");
+      return;
+    }
+
+    if (state.subject !== subject) {
+      bus.emit(
+        "output:append",
+        `Nenhuma confirmação pendente para subject "${subject}".`
+      );
+      return;
+    }
+
+    const noteIds = state.noteIds;
+    clearDeleteBySubjectState();
+
+    if (!noteIds.length) {
+      bus.emit("output:append", "Nenhuma nota encontrada para deletar.");
       return;
     }
 
     const { data, error: deleteError } = await client
       .from("notes")
       .delete()
-      .eq("id", id)
+      .in("id", noteIds)
       .eq("user_id", user.id)
       .select("id");
 
     if (deleteError) {
-      bus.emit("output:append", `Erro ao deletar nota: ${deleteError.message}`);
+      bus.emit("output:append", `Erro ao deletar notas: ${deleteError.message}`);
       return;
     }
 
-    if (!data || data.length === 0) {
-      bus.emit("output:append", "Nenhuma nota encontrada para deletar.");
-      return;
-    }
+    const deletedCount = data?.length ?? 0;
+    const relationsDeleted = await deleteRelationsForNotes({
+      bus,
+      client,
+      userId: user.id,
+      noteIds,
+    });
 
-    bus.emit("output:append", `Nota ${id} removida.`);
+    bus.emit(
+      "output:append",
+      `Notas deletadas: ${deletedCount} | Relações removidas: ${relationsDeleted}`
+    );
+    bus.emit("graph:refresh");
   };
 }
