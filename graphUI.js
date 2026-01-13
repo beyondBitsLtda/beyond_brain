@@ -9,6 +9,7 @@ import { createRelationWeightModal } from "./ui/relationWeightModal.js";
 import { clearDeleteBySubjectState } from "./state/deleteBySubjectState.js";
 import { listRelationsForNote } from "./commands/rels.js";
 import { ensureRelationWeightColumn } from "./schemaUtils.js";
+import { getNoteKind, getRefLabel, normalizeRef } from "./refUtils.js";
 
 const LABEL_LIMIT = 24;
 const DEPTH_MIN = 1;
@@ -77,11 +78,14 @@ function mapElements(notes, relations, allowedIds) {
     .filter((note) => noteSet.has(note.id))
     .map((note) => {
       const subject = note.subject ?? "";
+      const kind = getNoteKind(note);
       const nodeData = {
         id: note.id,
         subject,
         moment: note.moment ?? "",
         created_at: note.created_at ?? "",
+        ref: normalizeRef(note.ref ?? ""),
+        kind: kind ?? "",
         short_label: shortLabel(subject),
       };
       debugLog("nodeData", {
@@ -120,6 +124,12 @@ export function createGraphUI(bus, focusManager) {
   const detailSubject = document.getElementById("graph-detail-subject");
   const detailMoment = document.getElementById("graph-detail-moment");
   const detailCreated = document.getElementById("graph-detail-created");
+  const detailRef = document.getElementById("graph-detail-ref");
+  const detailActions = document.getElementById("graph-detail-actions");
+  const refIdeaButton = document.getElementById("graph-ref-idea");
+  const refTaskButton = document.getElementById("graph-ref-task");
+  const refClearButton = document.getElementById("graph-ref-clear");
+  const refListButton = document.getElementById("graph-ref-list");
   const noteWindow = createGraphNoteWindow(overlay);
   const actionPopover = createActionPopover();
   const confirmModal = createConfirmModal(document.body);
@@ -137,6 +147,7 @@ export function createGraphUI(bus, focusManager) {
   let relationCache = [];
   let relationIdColumnAvailable = null;
   let relationCreatedAtAvailable = null;
+  let selectedNoteId = null;
   let connectMode = {
     active: false,
     fromNoteId: null,
@@ -174,6 +185,8 @@ export function createGraphUI(bus, focusManager) {
       edgeColor: styles.getPropertyValue("--edge-color").trim(),
       edgeStrongColor: styles.getPropertyValue("--edge-strong-color").trim(),
       edgeGlowColor: styles.getPropertyValue("--edge-glow-color").trim(),
+      idea: styles.getPropertyValue("--idea").trim(),
+      task: styles.getPropertyValue("--task").trim(),
     };
   }
 
@@ -272,6 +285,8 @@ export function createGraphUI(bus, focusManager) {
       edgeColor,
       edgeStrongColor,
       edgeGlowColor,
+      idea,
+      task,
     } = tokens;
 
     const edgeBase = getEdgeStyle({ edgeColor, edgeStrongColor, edgeGlowColor });
@@ -320,8 +335,33 @@ export function createGraphUI(bus, focusManager) {
       {
         selector: "node:selected",
         style: {
-          "background-color": accent,
-          color: bg,
+          "border-color": accent,
+          "border-width": 3,
+          "shadow-blur": 12,
+          "shadow-color": accent,
+          "shadow-opacity": 0.6,
+        },
+      },
+      {
+        selector: 'node[kind = "ideia"]',
+        style: {
+          "background-color": nodeBg,
+          "border-color": idea,
+          color: idea,
+          "shadow-blur": 10,
+          "shadow-color": idea,
+          "shadow-opacity": 0.6,
+        },
+      },
+      {
+        selector: 'node[kind = "task"]',
+        style: {
+          "background-color": nodeBg,
+          "border-color": task,
+          color: task,
+          "shadow-blur": 10,
+          "shadow-color": task,
+          "shadow-opacity": 0.6,
         },
       },
       {
@@ -352,6 +392,14 @@ export function createGraphUI(bus, focusManager) {
     }
   });
 
+  setRefActionsEnabled(false);
+  refIdeaButton?.addEventListener("click", () => runSetRefCommand("ideia"));
+  refTaskButton?.addEventListener("click", () => runSetRefCommand("task"));
+  refClearButton?.addEventListener("click", () => runSetRefCommand("clear"));
+  refListButton?.addEventListener("click", () => {
+    bus.emit("command:submit", { raw: "refs" });
+  });
+
   function openActionPopoverAtEvent(key, event, items, title) {
     const { clientX = 0, clientY = 0 } = event?.originalEvent ?? event ?? {};
     const terminalRect = document.querySelector(".terminal")?.getBoundingClientRect();
@@ -365,8 +413,12 @@ export function createGraphUI(bus, focusManager) {
     detailSubject.textContent = data.subject ?? "";
     detailMoment.textContent = data.moment ?? "";
     detailCreated.textContent = data.created_at ?? "";
+    detailRef.textContent = getRefLabel({ ref: data.ref ?? "" });
     detailEmpty.hidden = true;
     detailList.hidden = false;
+    detailActions.hidden = false;
+    selectedNoteId = data.id ?? null;
+    setRefActionsEnabled(Boolean(selectedNoteId));
   }
 
   function clearDetails() {
@@ -374,8 +426,25 @@ export function createGraphUI(bus, focusManager) {
     detailSubject.textContent = "";
     detailMoment.textContent = "";
     detailCreated.textContent = "";
+    detailRef.textContent = "";
     detailList.hidden = true;
     detailEmpty.hidden = false;
+    detailActions.hidden = true;
+    selectedNoteId = null;
+    setRefActionsEnabled(false);
+  }
+
+  function setRefActionsEnabled(enabled) {
+    [refIdeaButton, refTaskButton, refClearButton, refListButton].forEach((button) => {
+      if (!button) return;
+      button.disabled = !enabled && button !== refListButton;
+    });
+  }
+
+  function runSetRefCommand(value) {
+    if (!selectedNoteId) return;
+    const refValue = value ? ` ${value}` : "";
+    bus.emit("command:submit", { raw: `setref "${selectedNoteId}"${refValue}` });
   }
 
   function findRelationInfo(data) {
@@ -421,6 +490,7 @@ export function createGraphUI(bus, focusManager) {
 
     cy.on("tap", "node", (event) => {
       const data = event.target.data();
+      showDetails(data);
       if (connectMode.active) {
         handleConnectTarget(data);
         return;
@@ -598,7 +668,7 @@ export function createGraphUI(bus, focusManager) {
     ]
       .filter(Boolean)
       .join(",");
-    const noteSelectFields = "id,subject,created_at,moment,body";
+    const noteSelectFields = "id,subject,created_at,moment,body,ref";
     debugLog("notes select fields", noteSelectFields);
 
     const [notesResponse, relsResponse] = await Promise.all([

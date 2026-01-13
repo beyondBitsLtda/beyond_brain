@@ -6,6 +6,8 @@
   --border: #0f0;
   --border-soft: var(--border);
   --accent: #0f0;
+  --idea: #3b82f6;
+  --task: #f87171;
   --cursor: #0f0;
   --glow: rgba(0, 255, 0, 0.25);
   --overlay: rgba(0, 0, 0, 0.92);
@@ -408,6 +410,28 @@ body::after {
 
 .terminal__line--clickable:hover {
   color: var(--accent);
+}
+
+.bb-idea {
+  color: var(--idea);
+  text-shadow: 0 0 6px rgba(59, 130, 246, 0.4);
+}
+
+.bb-task {
+  color: var(--task);
+  text-shadow: 0 0 6px rgba(248, 113, 113, 0.4);
+}
+
+.bb-badge-idea {
+  color: var(--idea);
+}
+
+.bb-badge-task {
+  color: var(--task);
+}
+
+.bb-ref {
+  color: var(--muted);
 }
 
 .terminal {
@@ -1596,4 +1620,39 @@ html[data-theme="xp"] .terminal__cursor {
 .graph-detail__list dd {
   margin: 0;
   word-break: break-word;
+}
+
+.graph-detail__actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.graph-detail__buttons,
+.graph-detail__tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.graph-detail__button {
+  border: var(--border-width) solid var(--border);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.graph-detail__button:hover,
+.graph-detail__button:focus-visible {
+  background: var(--accent);
+  color: var(--bg);
+}
+
+.graph-detail__button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }

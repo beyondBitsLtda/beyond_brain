@@ -19,6 +19,13 @@ import {
 import { listRelationsForNote } from "./rels.js";
 import { createConfirmModal } from "../ui/confirmModal.js";
 import { createRelationModal } from "../ui/relationModal.js";
+import {
+  getKindStyle,
+  getNoteKind,
+  getRefLabel,
+  isIdeaOrTask,
+  normalizeRef,
+} from "../refUtils.js";
 const NOTE_FIELDS = [
   "id",
   "subject",
@@ -56,6 +63,15 @@ function ensureNoteKeyword(bus, raw, action) {
 
 function parseSelectFields(raw) {
   const match = raw.match(/FIELDS\(([^)]+)\)/i);
+  if (!match) return null;
+  return match[1]
+    .split(",")
+    .map((field) => field.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+function parseShowFields(raw) {
+  const match = raw.match(/SHOW\s+(.+?)(?:\s+WHERE|\s+LIMIT|$)/i);
   if (!match) return null;
   return match[1]
     .split(",")
@@ -140,16 +156,37 @@ function formatShortId(id) {
   return String(id ?? "").slice(0, ID_PREFIX_LENGTH);
 }
 
-function formatNoteTable(notes) {
-  const fields = ["idx", "subject", "created_at", "body"];
+function mergeRequestedFields(...fieldGroups) {
+  const merged = fieldGroups.flat().filter(Boolean);
+  if (merged.length === 0) return null;
+  return Array.from(new Set(merged));
+}
+
+function formatNoteTable(notes, { showRef } = {}) {
+  const fields = ["idx", "badge", "subject"];
+  if (showRef) {
+    fields.push("ref");
+  }
+  fields.push("created_at", "body");
+
+  const headerLabels = {
+    idx: "idx",
+    badge: "tag",
+    subject: "subject",
+    ref: "ref",
+    created_at: "created_at",
+    body: "body",
+  };
   const rows = notes.map((note, index) => ({
     idx: `#${index + 1}`,
+    badge: getKindStyle(getNoteKind(note)).badge,
     subject: note.subject ?? "",
+    ref: showRef ? getRefLabel(note) : "",
     created_at: formatDateTime(note.created_at ?? ""),
     body: normalizeSummary(note.body ?? ""),
   }));
 
-  const widths = fields.map((field) => field.length);
+  const widths = fields.map((field) => (headerLabels[field] ?? field).length);
   rows.forEach((row) => {
     fields.forEach((field, index) => {
       widths[index] = Math.max(widths[index], String(row[field]).length);
@@ -158,7 +195,9 @@ function formatNoteTable(notes) {
 
   const maxWidths = {
     idx: 5,
+    badge: 7,
     subject: 28,
+    ref: 16,
     created_at: 19,
     body: 50,
   };
@@ -172,7 +211,7 @@ function formatNoteTable(notes) {
       .map((value, index) => truncateCell(String(value), finalWidths[index]).padEnd(finalWidths[index]))
       .join(" | ")} |`;
 
-  const header = formatRow(fields);
+  const header = formatRow(fields.map((field) => headerLabels[field] ?? field));
   const dataRows = rows.map((row) =>
     formatRow(fields.map((field) => row[field]))
   );
@@ -297,16 +336,19 @@ function handleRelationTargetSelection(bus, note) {
   return true;
 }
 
-function renderNotesOutput(bus, notes) {
+function renderNotesOutput(bus, notes, { showRef } = {}) {
   setList(notes);
-  const { lines, rows } = formatNoteTable(notes);
+  const { lines, rows } = formatNoteTable(notes, { showRef });
   lines.forEach((line, index) => {
     const rowIndex = index - 3;
     if (rowIndex >= 0 && rowIndex < rows.length) {
       const note = notes[rowIndex];
+      const kind = getNoteKind(note);
+      const { cssClass } = getKindStyle(kind);
+      const className = ["terminal__line--clickable", cssClass].filter(Boolean).join(" ");
       bus.emit("output:append", {
         text: line,
-        className: "terminal__line--clickable",
+        className,
         data: {
           openIndex: rowIndex + 1,
           noteId: note?.id,
@@ -390,6 +432,10 @@ function renderNotesOutput(bus, notes) {
       bus.emit("output:append", line);
     }
   });
+  bus.emit(
+    "output:append",
+    "Options: setref <id> ideia | setref <id> task | setref <id> clear | refs"
+  );
 }
 
 function resolveSelectFields(bus, fields) {
@@ -476,6 +522,54 @@ function startConfirmPrompt(bus, { message, placeholder, onConfirm }) {
       bus.emit("input:placeholder", "");
       bus.emit("output:append", "Operação cancelada.");
     },
+  });
+}
+
+function summarizeRefs(notes) {
+  const summary = {
+    ideia: 0,
+    task: 0,
+    empty: 0,
+    others: 0,
+  };
+  const refCounts = new Map();
+
+  notes.forEach((note) => {
+    const normalized = normalizeRef(note.ref);
+    const kind = getNoteKind(note);
+    if (!normalized) {
+      summary.empty += 1;
+      return;
+    }
+    if (kind === "ideia") {
+      summary.ideia += 1;
+    } else if (kind === "task") {
+      summary.task += 1;
+    } else {
+      summary.others += 1;
+    }
+    refCounts.set(normalized, (refCounts.get(normalized) ?? 0) + 1);
+  });
+
+  return { summary, refCounts };
+}
+
+function emitRefSummary(bus, summary) {
+  bus.emit("output:append", "REF SUMMARY:");
+  bus.emit("output:append", `ideia: ${summary.ideia}`);
+  bus.emit("output:append", `task: ${summary.task}`);
+  bus.emit("output:append", `empty: ${summary.empty}`);
+  bus.emit("output:append", `others: ${summary.others}`);
+}
+
+function emitRefList(bus, entries, title) {
+  bus.emit("output:append", title);
+  if (entries.length === 0) {
+    bus.emit("output:append", "(nenhuma ref encontrada)");
+    return;
+  }
+  entries.forEach(([ref, count]) => {
+    bus.emit("output:append", `"${ref}": ${count}`);
   });
 }
 
@@ -577,7 +671,7 @@ export function insertNoteCommand(bus) {
     const subject = pairs.subject?.trim();
     const moment = pairs.moment?.trim();
     const body = pairs.body?.trim();
-    const ref = pairs.ref?.trim();
+    const ref = normalizeRef(pairs.ref);
 
     if (!subject || !moment || !body) {
       bus.emit(
@@ -622,8 +716,13 @@ export function selectNoteCommand(bus, focusManager) {
     const user = await getAuthenticatedUser(bus, client);
     if (!user) return;
 
-    const requestedFields = resolveSelectFields(bus, parseSelectFields(raw));
+    const explicitFields = mergeRequestedFields(
+      parseSelectFields(raw),
+      parseShowFields(raw)
+    );
+    const requestedFields = resolveSelectFields(bus, explicitFields);
     if (!requestedFields) return;
+    const showRef = explicitFields?.includes("ref") ?? false;
 
     const { conditions, error: whereError } = parseWhereClause(raw);
     if (whereError) {
@@ -639,13 +738,7 @@ export function selectNoteCommand(bus, focusManager) {
       }
     }
 
-    const baseFields = [
-      "id",
-      "subject",
-      "moment",
-      "body",
-      "created_at",
-    ];
+    const baseFields = ["id", "subject", "moment", "body", "created_at", "ref"];
     const selectFields = Array.from(new Set([...requestedFields, ...baseFields]));
 
     let query = client
@@ -674,7 +767,7 @@ export function selectNoteCommand(bus, focusManager) {
       return;
     }
 
-    renderNotesOutput(bus, data);
+    renderNotesOutput(bus, data, { showRef });
   };
 }
 
@@ -710,7 +803,11 @@ export function updateNoteCommand(bus) {
         bus.emit("output:append", `Campo inválido para atualização: ${key}.`);
         return;
       }
-      updates[key] = value.trim();
+      if (key === "ref") {
+        updates[key] = normalizeRef(value);
+      } else {
+        updates[key] = value.trim();
+      }
     }
 
     if (Object.keys(updates).length === 0) {
@@ -740,6 +837,124 @@ export function updateNoteCommand(bus) {
     }
 
     bus.emit("output:append", `Nota ${id} atualizada.`);
+  };
+}
+
+export function setRefCommand(bus) {
+  return async ({ raw = "" } = {}) => {
+    const match = raw.match(/^setref\s+("([^"]+)"|(\S+))\s+(\S+)/i);
+    if (!match) {
+      bus.emit("output:append", 'Uso: setref "<id>" ideia|task|clear');
+      return;
+    }
+
+    const id = match[2] ?? match[3];
+    const value = match[4]?.toLowerCase();
+    if (!id || !value) {
+      bus.emit("output:append", 'Uso: setref "<id>" ideia|task|clear');
+      return;
+    }
+
+    let refValue = "";
+    if (value === "clear") {
+      refValue = "";
+    } else if (isIdeaOrTask(value)) {
+      refValue = normalizeRef(value);
+    } else {
+      bus.emit("output:append", 'Uso: setref "<id>" ideia|task|clear');
+      return;
+    }
+
+    const { client, error } = getSupabaseClient();
+    if (error || !client) {
+      bus.emit("output:append", "Supabase não configurado. Use auth --register ou auth para autenticar.");
+      return;
+    }
+
+    const user = await getAuthenticatedUser(bus, client);
+    if (!user) return;
+
+    const { data, error: updateError } = await client
+      .from("notes")
+      .update({ ref: refValue || null })
+      .eq("id", id)
+      .eq("user_id", user.id)
+      .select("id");
+
+    if (updateError) {
+      bus.emit("output:append", `Erro ao atualizar ref: ${updateError.message}`);
+      return;
+    }
+
+    if (!data || data.length === 0) {
+      bus.emit("output:append", "Nenhuma nota encontrada para atualizar ref.");
+      return;
+    }
+
+    bus.emit("output:append", `Ref da nota ${id} atualizada.`);
+    bus.emit("graph:refresh");
+  };
+}
+
+export function refsCommand(bus) {
+  return async ({ raw = "" } = {}) => {
+    const normalized = raw.trim();
+    if (!normalized.toLowerCase().startsWith("refs")) {
+      bus.emit("output:append", "Uso: refs [--kinds|\"texto\"]");
+      return;
+    }
+
+    const isKinds = /^refs\s+--kinds\b/i.test(normalized);
+    let filter = null;
+    if (!isKinds) {
+      const filterMatch = normalized.match(/^refs\s+(.+)$/i);
+      if (filterMatch) {
+        filter = stripQuotes(filterMatch[1]).trim() || null;
+      }
+    }
+
+    const { client, error } = getSupabaseClient();
+    if (error || !client) {
+      bus.emit("output:append", "Supabase não configurado. Use auth --register ou auth para autenticar.");
+      return;
+    }
+
+    const user = await getAuthenticatedUser(bus, client);
+    if (!user) return;
+
+    const { data, error: selectError } = await client
+      .from("notes")
+      .select("ref")
+      .eq("user_id", user.id);
+
+    if (selectError) {
+      bus.emit("output:append", `Erro ao listar refs: ${selectError.message}`);
+      return;
+    }
+
+    const notes = data ?? [];
+    if (notes.length === 0) {
+      bus.emit("output:append", "Nenhuma nota encontrada.");
+      return;
+    }
+
+    const { summary, refCounts } = summarizeRefs(notes);
+    emitRefSummary(bus, summary);
+
+    if (isKinds) {
+      return;
+    }
+
+    const filterLower = filter ? filter.toLowerCase() : null;
+    const entries = Array.from(refCounts.entries())
+      .filter(([ref]) => (!filterLower ? true : ref.toLowerCase().includes(filterLower)))
+      .sort((a, b) => {
+        if (b[1] !== a[1]) return b[1] - a[1];
+        return a[0].localeCompare(b[0]);
+      });
+
+    const title = filter ? `REFS MATCHING "${filter}"` : "TOP REFS:";
+    emitRefList(bus, entries, title);
   };
 }
 

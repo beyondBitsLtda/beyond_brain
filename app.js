@@ -15,7 +15,9 @@ import {
   deleteNoteCommand,
   confirmDeleteCommand,
   insertNoteCommand,
+  refsCommand,
   selectNoteCommand,
+  setRefCommand,
   updateNoteCommand,
 } from "./commands/notes.js";
 import { graphCommand } from "./commands/graph.js";
@@ -76,6 +78,10 @@ const commands = {
   delete: deleteNoteCommand(bus),
   CONFIRM: confirmDeleteCommand(bus),
   confirm: confirmDeleteCommand(bus),
+  SETREF: setRefCommand(bus),
+  setref: setRefCommand(bus),
+  REFS: refsCommand(bus),
+  refs: refsCommand(bus),
   now: nowCommand(bus),
   NOW: nowCommand(bus),
   last: lastCommand(bus),
