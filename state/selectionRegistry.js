@@ -1,7 +1,18 @@
 let lastList = [];
+let lastSelect = [];
+let lastSelectMeta = {
+  showRef: false,
+};
 
-export function setList(items) {
+export function setList(items, options = {}) {
   lastList = Array.isArray(items) ? items.slice() : [];
+  lastSelect = lastList.map((item, index) => ({
+    idx: index + 1,
+    id: item?.id ?? null,
+  }));
+  lastSelectMeta = {
+    showRef: Boolean(options.showRef),
+  };
 }
 
 export function getByIndex(index) {
@@ -13,8 +24,20 @@ export function getByIndex(index) {
 
 export function clear() {
   lastList = [];
+  lastSelect = [];
+  lastSelectMeta = {
+    showRef: false,
+  };
 }
 
 export function getLastList() {
   return lastList.slice();
+}
+
+export function getLastSelect() {
+  return lastSelect.slice();
+}
+
+export function getLastSelectMeta() {
+  return { ...lastSelectMeta };
 }
