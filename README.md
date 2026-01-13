@@ -35,6 +35,15 @@ setref "<id>" task
 setref "<id>" clear
 ```
 
+### Marcar ref via índice do SELECT
+```
+SELECT NOTE
+mark 01 ideia
+mark 02 task
+mark 03 clear
+open 01
+```
+
 ### Consultar refs existentes
 ```
 refs

@@ -726,6 +726,14 @@ body::after {
   font-size: 0.9rem;
 }
 
+.note-viewer__actions {
+  color: var(--muted);
+  font-size: 0.85rem;
+  padding: 0.35rem 0.5rem;
+  border: var(--border-width) solid var(--border-soft);
+  background: var(--screen-bg);
+}
+
 .note-viewer__body {
   margin: 0;
   padding: 0.75rem;

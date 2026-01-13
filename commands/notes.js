@@ -4,7 +4,14 @@ import {
   getBodyColumnMigrationHint,
   insertNote,
 } from "../notesService.js";
-import { clear, getByIndex, getLastList, setList } from "../state/selectionRegistry.js";
+import {
+  clear,
+  getByIndex,
+  getLastList,
+  getLastSelect,
+  getLastSelectMeta,
+  setList,
+} from "../state/selectionRegistry.js";
 import {
   clearDeleteBySubjectState,
   getDeleteBySubjectState,
@@ -39,6 +46,7 @@ const TABLE_MAX_WIDTH = 40;
 const BODY_SUMMARY_LIMIT = 140;
 const ID_PREFIX_LENGTH = 8;
 const DELETE_PREVIEW_LIMIT = 5;
+const SELECT_INDEX_PAD = 2;
 const relationModal = createRelationModal(document.body);
 const confirmModal = createConfirmModal(document.body);
 
@@ -156,6 +164,12 @@ function formatShortId(id) {
   return String(id ?? "").slice(0, ID_PREFIX_LENGTH);
 }
 
+function formatSelectIndex(value) {
+  const index = Number.isFinite(value) ? value : Number.parseInt(value, 10);
+  if (!Number.isFinite(index)) return "";
+  return String(index).padStart(SELECT_INDEX_PAD, "0");
+}
+
 function mergeRequestedFields(...fieldGroups) {
   const merged = fieldGroups.flat().filter(Boolean);
   if (merged.length === 0) return null;
@@ -163,14 +177,14 @@ function mergeRequestedFields(...fieldGroups) {
 }
 
 function formatNoteTable(notes, { showRef } = {}) {
-  const fields = ["idx", "badge", "subject"];
+  const fields = ["index", "badge", "subject"];
   if (showRef) {
     fields.push("ref");
   }
   fields.push("created_at", "body");
 
   const headerLabels = {
-    idx: "idx",
+    index: "#",
     badge: "tag",
     subject: "subject",
     ref: "ref",
@@ -178,7 +192,7 @@ function formatNoteTable(notes, { showRef } = {}) {
     body: "body",
   };
   const rows = notes.map((note, index) => ({
-    idx: `#${index + 1}`,
+    index: formatSelectIndex(index + 1),
     badge: getKindStyle(getNoteKind(note)).badge,
     subject: note.subject ?? "",
     ref: showRef ? getRefLabel(note) : "",
@@ -194,7 +208,7 @@ function formatNoteTable(notes, { showRef } = {}) {
   });
 
   const maxWidths = {
-    idx: 5,
+    index: 2,
     badge: 7,
     subject: 28,
     ref: 16,
@@ -337,7 +351,7 @@ function handleRelationTargetSelection(bus, note) {
 }
 
 function renderNotesOutput(bus, notes, { showRef } = {}) {
-  setList(notes);
+  setList(notes, { showRef });
   const { lines, rows } = formatNoteTable(notes, { showRef });
   lines.forEach((line, index) => {
     const rowIndex = index - 3;
@@ -352,7 +366,7 @@ function renderNotesOutput(bus, notes, { showRef } = {}) {
         data: {
           openIndex: rowIndex + 1,
           noteId: note?.id,
-          idx: `#${rowIndex + 1}`,
+          idx: formatSelectIndex(rowIndex + 1),
         },
         onClick: () => handleRelationTargetSelection(bus, note),
         actionPopover: {
@@ -364,7 +378,10 @@ function renderNotesOutput(bus, notes, { showRef } = {}) {
               action: () => {
                 const selected = getByIndex(rowIndex + 1);
                 if (selected) {
-                  bus.emit("noteViewer:open", selected);
+                  bus.emit("noteViewer:open", {
+                    ...selected,
+                    __index: rowIndex + 1,
+                  });
                 }
               },
             },
@@ -418,7 +435,8 @@ function renderNotesOutput(bus, notes, { showRef } = {}) {
                       return true;
                     }
                     bus.emit("output:append", "Lista atualizada:");
-                    renderNotesOutput(bus, updatedList);
+                    const { showRef } = getLastSelectMeta();
+                    renderNotesOutput(bus, updatedList, { showRef });
                     confirmModal.close();
                     return true;
                   },
@@ -432,10 +450,15 @@ function renderNotesOutput(bus, notes, { showRef } = {}) {
       bus.emit("output:append", line);
     }
   });
+  const first = formatSelectIndex(1);
+  const second = formatSelectIndex(2);
+  const third = formatSelectIndex(3);
+  bus.emit("output:append", "Options:");
   bus.emit(
     "output:append",
-    "Options: setref <id> ideia | setref <id> task | setref <id> clear | refs"
+    `  mark ${first} ideia | mark ${second} task | mark ${third} clear`
   );
+  bus.emit("output:append", `  open ${first}`);
 }
 
 function resolveSelectFields(bus, fields) {
@@ -571,6 +594,37 @@ function emitRefList(bus, entries, title) {
   entries.forEach(([ref, count]) => {
     bus.emit("output:append", `"${ref}": ${count}`);
   });
+}
+
+async function updateNoteRef({ bus, id, refValue }) {
+  const { client, error } = getSupabaseClient();
+  if (error || !client) {
+    bus.emit("output:append", "Supabase não configurado. Use auth --register ou auth para autenticar.");
+    return { ok: false };
+  }
+
+  const user = await getAuthenticatedUser(bus, client);
+  if (!user) return { ok: false };
+
+  const { data, error: updateError } = await client
+    .from("notes")
+    .update({ ref: refValue || null })
+    .eq("id", id)
+    .eq("user_id", user.id)
+    .select("id");
+
+  if (updateError) {
+    bus.emit("output:append", `Erro ao atualizar ref: ${updateError.message}`);
+    return { ok: false };
+  }
+
+  if (!data || data.length === 0) {
+    bus.emit("output:append", "Nenhuma nota encontrada para atualizar ref.");
+    return { ok: false };
+  }
+
+  bus.emit("graph:refresh");
+  return { ok: true };
 }
 
 async function deleteNoteById({ bus, client, userId, id }) {
@@ -865,34 +919,10 @@ export function setRefCommand(bus) {
       return;
     }
 
-    const { client, error } = getSupabaseClient();
-    if (error || !client) {
-      bus.emit("output:append", "Supabase não configurado. Use auth --register ou auth para autenticar.");
-      return;
-    }
-
-    const user = await getAuthenticatedUser(bus, client);
-    if (!user) return;
-
-    const { data, error: updateError } = await client
-      .from("notes")
-      .update({ ref: refValue || null })
-      .eq("id", id)
-      .eq("user_id", user.id)
-      .select("id");
-
-    if (updateError) {
-      bus.emit("output:append", `Erro ao atualizar ref: ${updateError.message}`);
-      return;
-    }
-
-    if (!data || data.length === 0) {
-      bus.emit("output:append", "Nenhuma nota encontrada para atualizar ref.");
-      return;
-    }
+    const result = await updateNoteRef({ bus, id, refValue });
+    if (!result.ok) return;
 
     bus.emit("output:append", `Ref da nota ${id} atualizada.`);
-    bus.emit("graph:refresh");
   };
 }
 
@@ -955,6 +985,55 @@ export function refsCommand(bus) {
 
     const title = filter ? `REFS MATCHING "${filter}"` : "TOP REFS:";
     emitRefList(bus, entries, title);
+  };
+}
+
+export function markCommand(bus) {
+  return async ({ raw = "" } = {}) => {
+    const match = raw.match(/^mark\s+(\d+)\s+(\S+)/i);
+    if (!match) {
+      bus.emit("output:append", "Uso: mark <index> ideia|task|clear");
+      return;
+    }
+
+    const index = Number.parseInt(match[1], 10);
+    const value = match[2]?.toLowerCase();
+    const lastSelect = getLastSelect();
+    if (!lastSelect.length || Number.isNaN(index)) {
+      bus.emit("output:append", "ERR :: Invalid index. Run SELECT NOTE first.");
+      return;
+    }
+
+    const target = lastSelect.find((entry) => entry.idx === index);
+    if (!target?.id) {
+      bus.emit("output:append", "ERR :: Invalid index. Run SELECT NOTE first.");
+      return;
+    }
+
+    let refValue = "";
+    if (value === "clear") {
+      refValue = "";
+    } else if (isIdeaOrTask(value)) {
+      refValue = normalizeRef(value);
+    } else {
+      bus.emit("output:append", "Uso: mark <index> ideia|task|clear");
+      return;
+    }
+
+    const result = await updateNoteRef({ bus, id: target.id, refValue });
+    if (!result.ok) return;
+
+    bus.emit("output:append", `OK :: Ref atualizada para ${formatSelectIndex(index)}.`);
+
+    const lastList = getLastList();
+    if (lastList.length > 0) {
+      const updated = lastList.map((note, idx) =>
+        idx + 1 === index ? { ...note, ref: refValue || null } : note
+      );
+      const { showRef } = getLastSelectMeta();
+      bus.emit("output:append", "Tabela atualizada:");
+      renderNotesOutput(bus, updated, { showRef });
+    }
   };
 }
 
