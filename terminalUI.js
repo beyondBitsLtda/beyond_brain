@@ -31,7 +31,10 @@ export function createTerminalUI(bus) {
     } else if (payload && typeof payload === "object") {
       line.textContent = payload.text ?? "";
       if (payload.className) {
-        line.classList.add(payload.className);
+        const classes = payload.className.split(" ").filter(Boolean);
+        if (classes.length > 0) {
+          line.classList.add(...classes);
+        }
       }
       if (payload.data && typeof payload.data === "object") {
         Object.entries(payload.data).forEach(([key, value]) => {
