@@ -10,6 +10,7 @@ import {
   getLastList,
   getLastSelect,
   getLastSelectMeta,
+  setLastSelect,
   setList,
 } from "../state/selectionRegistry.js";
 import {
@@ -28,9 +29,10 @@ import { createConfirmModal } from "../ui/confirmModal.js";
 import { createRelationModal } from "../ui/relationModal.js";
 import {
   getKindStyle,
-  getNoteKind,
+  getRefKind,
   getRefLabel,
-  isIdeaOrTask,
+  isIdea,
+  isTask,
   normalizeRef,
 } from "../refUtils.js";
 const NOTE_FIELDS = [
@@ -125,6 +127,21 @@ function parseWhereClause(raw) {
   return { conditions };
 }
 
+function parseRefUpdateValue(value, usage) {
+  // Keep ref rules centralized via refUtils (ideia/task/clear only).
+  const normalized = String(value ?? "").trim().toLowerCase();
+  if (!normalized) {
+    return { ok: false, error: usage };
+  }
+  if (normalized === "clear") {
+    return { ok: true, value: "" };
+  }
+  if (isIdea(normalized) || isTask(normalized)) {
+    return { ok: true, value: normalizeRef(normalized) };
+  }
+  return { ok: false, error: usage };
+}
+
 function formatDateTime(value) {
   if (!value) return "";
   const date = value instanceof Date ? value : new Date(value);
@@ -193,7 +210,7 @@ function formatNoteTable(notes, { showRef } = {}) {
   };
   const rows = notes.map((note, index) => ({
     index: formatSelectIndex(index + 1),
-    badge: getKindStyle(getNoteKind(note)).badge,
+    badge: getKindStyle(getRefKind(note)).badge,
     subject: note.subject ?? "",
     ref: showRef ? getRefLabel(note) : "",
     created_at: formatDateTime(note.created_at ?? ""),
@@ -350,14 +367,19 @@ function handleRelationTargetSelection(bus, note) {
   return true;
 }
 
-function renderNotesOutput(bus, notes, { showRef } = {}) {
-  setList(notes, { showRef });
+function renderNotesOutput(bus, notes, { showRef, updateSelection = false } = {}) {
+  // Keep selection registry in sync only when this list should become the active SELECT NOTE list.
+  if (updateSelection) {
+    setLastSelect(notes, { showRef });
+  } else {
+    setList(notes);
+  }
   const { lines, rows } = formatNoteTable(notes, { showRef });
   lines.forEach((line, index) => {
     const rowIndex = index - 3;
     if (rowIndex >= 0 && rowIndex < rows.length) {
       const note = notes[rowIndex];
-      const kind = getNoteKind(note);
+      const kind = getRefKind(note);
       const { cssClass } = getKindStyle(kind);
       const className = ["terminal__line--clickable", cssClass].filter(Boolean).join(" ");
       bus.emit("output:append", {
@@ -436,7 +458,7 @@ function renderNotesOutput(bus, notes, { showRef } = {}) {
                     }
                     bus.emit("output:append", "Lista atualizada:");
                     const { showRef } = getLastSelectMeta();
-                    renderNotesOutput(bus, updatedList, { showRef });
+                    renderNotesOutput(bus, updatedList, { showRef, updateSelection: true });
                     confirmModal.close();
                     return true;
                   },
@@ -559,14 +581,14 @@ function summarizeRefs(notes) {
 
   notes.forEach((note) => {
     const normalized = normalizeRef(note.ref);
-    const kind = getNoteKind(note);
+    const kind = getRefKind(note);
     if (!normalized) {
       summary.empty += 1;
       return;
     }
-    if (kind === "ideia") {
+    if (isIdea(kind)) {
       summary.ideia += 1;
-    } else if (kind === "task") {
+    } else if (isTask(kind)) {
       summary.task += 1;
     } else {
       summary.others += 1;
@@ -597,6 +619,10 @@ function emitRefList(bus, entries, title) {
 }
 
 async function updateNoteRef({ bus, id, refValue }) {
+  if (!id) {
+    bus.emit("output:append", "ERR :: Note id inválido para atualizar ref.");
+    return { ok: false };
+  }
   const { client, error } = getSupabaseClient();
   if (error || !client) {
     bus.emit("output:append", "Supabase não configurado. Use auth --register ou auth para autenticar.");
@@ -821,7 +847,7 @@ export function selectNoteCommand(bus, focusManager) {
       return;
     }
 
-    renderNotesOutput(bus, data, { showRef });
+    renderNotesOutput(bus, data, { showRef, updateSelection: true });
   };
 }
 
@@ -903,23 +929,19 @@ export function setRefCommand(bus) {
     }
 
     const id = match[2] ?? match[3];
-    const value = match[4]?.toLowerCase();
+    const value = match[4];
     if (!id || !value) {
       bus.emit("output:append", 'Uso: setref "<id>" ideia|task|clear');
       return;
     }
 
-    let refValue = "";
-    if (value === "clear") {
-      refValue = "";
-    } else if (isIdeaOrTask(value)) {
-      refValue = normalizeRef(value);
-    } else {
-      bus.emit("output:append", 'Uso: setref "<id>" ideia|task|clear');
+    const parsedRef = parseRefUpdateValue(value, 'Uso: setref "<id>" ideia|task|clear');
+    if (!parsedRef.ok) {
+      bus.emit("output:append", parsedRef.error);
       return;
     }
 
-    const result = await updateNoteRef({ bus, id, refValue });
+    const result = await updateNoteRef({ bus, id, refValue: parsedRef.value });
     if (!result.ok) return;
 
     bus.emit("output:append", `Ref da nota ${id} atualizada.`);
@@ -997,7 +1019,7 @@ export function markCommand(bus) {
     }
 
     const index = Number.parseInt(match[1], 10);
-    const value = match[2]?.toLowerCase();
+    const value = match[2];
     const lastSelect = getLastSelect();
     if (!lastSelect.length) {
       bus.emit("output:append", "ERR :: No active list. Run SELECT NOTE first.");
@@ -1014,17 +1036,13 @@ export function markCommand(bus) {
       return;
     }
 
-    let refValue = "";
-    if (value === "clear") {
-      refValue = "";
-    } else if (isIdeaOrTask(value)) {
-      refValue = normalizeRef(value);
-    } else {
-      bus.emit("output:append", "Uso: mark <index> ideia|task|clear");
+    const parsedRef = parseRefUpdateValue(value, "Uso: mark <index> ideia|task|clear");
+    if (!parsedRef.ok) {
+      bus.emit("output:append", parsedRef.error);
       return;
     }
 
-    const result = await updateNoteRef({ bus, id: target.id, refValue });
+    const result = await updateNoteRef({ bus, id: target.id, refValue: parsedRef.value });
     if (!result.ok) return;
 
     bus.emit("output:append", `OK :: Ref atualizada para ${formatSelectIndex(index)}.`);
@@ -1032,11 +1050,11 @@ export function markCommand(bus) {
     const lastList = getLastList();
     if (lastList.length > 0) {
       const updated = lastList.map((note, idx) =>
-        idx + 1 === index ? { ...note, ref: refValue || null } : note
+        idx + 1 === index ? { ...note, ref: parsedRef.value || null } : note
       );
       const { showRef } = getLastSelectMeta();
       bus.emit("output:append", "Tabela atualizada:");
-      renderNotesOutput(bus, updated, { showRef });
+      renderNotesOutput(bus, updated, { showRef, updateSelection: true });
     }
   };
 }

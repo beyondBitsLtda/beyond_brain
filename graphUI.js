@@ -9,7 +9,7 @@ import { createRelationWeightModal } from "./ui/relationWeightModal.js";
 import { clearDeleteBySubjectState } from "./state/deleteBySubjectState.js";
 import { listRelationsForNote } from "./commands/rels.js";
 import { ensureRelationWeightColumn } from "./schemaUtils.js";
-import { getNoteKind, getRefLabel, normalizeRef } from "./refUtils.js";
+import { getRefKind, getRefLabel, normalizeRef } from "./refUtils.js";
 
 const LABEL_LIMIT = 24;
 const DEPTH_MIN = 1;
@@ -78,7 +78,7 @@ function mapElements(notes, relations, allowedIds) {
     .filter((note) => noteSet.has(note.id))
     .map((note) => {
       const subject = note.subject ?? "";
-      const kind = getNoteKind(note);
+      const kind = getRefKind(note);
       const nodeData = {
         id: note.id,
         subject,
