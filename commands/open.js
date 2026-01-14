@@ -1,6 +1,6 @@
 import { getSupabaseClient } from "../supabaseClient.js";
 import { getAuthenticatedUser } from "../notesService.js";
-import { getByIndex, getLastList, getLastSelect } from "../state/selectionRegistry.js";
+import { getLastList, getLastSelect } from "../state/selectionRegistry.js";
 
 function parseKeyValuePairs(raw) {
   const pairs = {};
@@ -25,6 +25,42 @@ function parseOpenNoteId(raw) {
   return match[1]?.trim() || null;
 }
 
+async function openNoteById({ bus, id, index }) {
+  const { client, error } = getSupabaseClient();
+  if (error || !client) {
+    bus.emit("output:append", "Supabase não configurado. Use auth --register ou auth para autenticar.");
+    return;
+  }
+
+  const user = await getAuthenticatedUser(bus, client);
+  if (!user) return;
+
+  const { data, error: selectError } = await client
+    .from("notes")
+    .select("id,subject,moment,body,created_at")
+    .eq("id", id)
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  if (selectError) {
+    bus.emit("output:append", `Erro ao abrir nota: ${selectError.message}`);
+    return;
+  }
+
+  if (!data) {
+    bus.emit("output:append", "Nenhuma nota encontrada com esse id.");
+    return;
+  }
+
+  const lastSelect = getLastSelect();
+  const indexValue =
+    Number.isFinite(index) ? index : lastSelect.find((entry) => entry.id === data.id)?.idx;
+  bus.emit(
+    "noteViewer:open",
+    indexValue ? { ...data, __index: indexValue } : data
+  );
+}
+
 export function openCommand(bus) {
   return async ({ args = [], raw = "" } = {}) => {
     const target = args[0];
@@ -34,50 +70,23 @@ export function openCommand(bus) {
     const noteId = parseOpenNoteId(raw);
 
     if (index) {
-      const note = getByIndex(index);
-      if (!note) {
+      const lastSelect = getLastSelect();
+      if (lastSelect.length === 0) {
+        bus.emit("output:append", "Nenhuma lista ativa. Rode SELECT NOTE primeiro.");
+        return;
+      }
+      const entry = lastSelect.find((item) => item.idx === index);
+      if (!entry?.id) {
         bus.emit("output:append", "Nenhuma nota encontrada para este índice.");
         return;
       }
-      bus.emit("noteViewer:open", { ...note, __index: index });
+      await openNoteById({ bus, id: entry.id, index });
       return;
     }
 
     if (id || noteId) {
       const resolvedId = id ?? noteId;
-      const { client, error } = getSupabaseClient();
-      if (error || !client) {
-        bus.emit("output:append", "Supabase não configurado. Use auth --register ou auth para autenticar.");
-        return;
-      }
-
-      const user = await getAuthenticatedUser(bus, client);
-      if (!user) return;
-
-      const { data, error: selectError } = await client
-        .from("notes")
-        .select("id,subject,moment,body,created_at")
-        .eq("id", resolvedId)
-        .eq("user_id", user.id)
-        .maybeSingle();
-
-      if (selectError) {
-        bus.emit("output:append", `Erro ao abrir nota: ${selectError.message}`);
-        return;
-      }
-
-      if (!data) {
-        bus.emit("output:append", "Nenhuma nota encontrada com esse id.");
-        return;
-      }
-
-      const lastSelect = getLastSelect();
-      const selectEntry = lastSelect.find((entry) => entry.id === data.id);
-      const indexValue = selectEntry?.idx ?? null;
-      bus.emit(
-        "noteViewer:open",
-        indexValue ? { ...data, __index: indexValue } : data
-      );
+      await openNoteById({ bus, id: resolvedId });
       return;
     }
 
