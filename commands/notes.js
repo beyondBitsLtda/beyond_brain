@@ -999,14 +999,18 @@ export function markCommand(bus) {
     const index = Number.parseInt(match[1], 10);
     const value = match[2]?.toLowerCase();
     const lastSelect = getLastSelect();
-    if (!lastSelect.length || Number.isNaN(index)) {
-      bus.emit("output:append", "ERR :: Invalid index. Run SELECT NOTE first.");
+    if (!lastSelect.length) {
+      bus.emit("output:append", "ERR :: No active list. Run SELECT NOTE first.");
+      return;
+    }
+    if (Number.isNaN(index)) {
+      bus.emit("output:append", "ERR :: Invalid index.");
       return;
     }
 
     const target = lastSelect.find((entry) => entry.idx === index);
     if (!target?.id) {
-      bus.emit("output:append", "ERR :: Invalid index. Run SELECT NOTE first.");
+      bus.emit("output:append", "ERR :: Invalid index.");
       return;
     }
 
