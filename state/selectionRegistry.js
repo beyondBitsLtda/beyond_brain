@@ -6,6 +6,9 @@ let lastSelectMeta = {
 
 export function setList(items, options = {}) {
   lastList = Array.isArray(items) ? items.slice() : [];
+  if (options.keepSelect !== true) {
+    return;
+  }
   lastSelect = lastList.map((item, index) => ({
     idx: index + 1,
     id: item?.id ?? null,

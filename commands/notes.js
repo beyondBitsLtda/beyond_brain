@@ -10,6 +10,7 @@ import {
   getLastList,
   getLastSelect,
   getLastSelectMeta,
+  setLastSelect,
   setList,
 } from "../state/selectionRegistry.js";
 import {
@@ -453,7 +454,7 @@ function renderNotesOutput(bus, notes, { showRef } = {}) {
                     }
                     bus.emit("output:append", "Lista atualizada:");
                     const { showRef } = getLastSelectMeta();
-                    renderNotesOutput(bus, updatedList, { showRef });
+                    renderNotesOutput(bus, updatedList, { showRef, updateSelection: true });
                     confirmModal.close();
                     return true;
                   },
@@ -842,7 +843,7 @@ export function selectNoteCommand(bus, focusManager) {
       return;
     }
 
-    renderNotesOutput(bus, data, { showRef });
+    renderNotesOutput(bus, data, { showRef, updateSelection: true });
   };
 }
 
@@ -1049,7 +1050,7 @@ export function markCommand(bus) {
       );
       const { showRef } = getLastSelectMeta();
       bus.emit("output:append", "Tabela atualizada:");
-      renderNotesOutput(bus, updated, { showRef });
+      renderNotesOutput(bus, updated, { showRef, updateSelection: true });
     }
   };
 }
