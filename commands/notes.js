@@ -367,13 +367,9 @@ function handleRelationTargetSelection(bus, note) {
   return true;
 }
 
-function renderNotesOutput(bus, notes, { showRef, updateSelection = false } = {}) {
-  // Keep selection registry in sync only when this list should become the active SELECT NOTE list.
-  if (updateSelection) {
-    setLastSelect(notes, { showRef });
-  } else {
-    setList(notes);
-  }
+function renderNotesOutput(bus, notes, { showRef } = {}) {
+  // Keep selection registry aligned with the rendered list.
+  setList(notes, { showRef });
   const { lines, rows } = formatNoteTable(notes, { showRef });
   lines.forEach((line, index) => {
     const rowIndex = index - 3;

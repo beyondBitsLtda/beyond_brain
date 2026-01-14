@@ -19,7 +19,7 @@ export function setList(items, options = {}) {
 }
 
 export function setLastSelect(items, options = {}) {
-  setList(items, { ...options, keepSelect: true });
+  setList(items, options);
 }
 
 export function getByIndex(index) {
