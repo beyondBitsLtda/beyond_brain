@@ -5,6 +5,25 @@
 2. Abra o app em um navegador e use o comando `ping` no terminal para testar a conexão. O comando mostrará `ping OK` quando as credenciais estiverem corretas.
 3. Não remova as palavras `export` do `config.js`. Elas são necessárias para que os módulos funcionem no navegador.
 
+## Rodando localmente (servidor estático)
+> **Importante:** abrir `index.html` via `file://` não funciona porque o browser bloqueia módulos ES. Use um servidor local simples.
+
+```bash
+python -m http.server 8000
+```
+
+Depois acesse `http://localhost:8000` no navegador.
+
+## Hospedando no GitHub Pages
+1. Faça commit das alterações e envie para o GitHub.
+2. No repositório, abra **Settings > Pages**.
+3. Em **Build and deployment**:
+   - **Source:** *Deploy from a branch*.
+   - **Branch:** selecione `main` (ou a branch principal) e a pasta `/root`.
+4. Salve e aguarde a publicação. O site ficará acessível na URL exibida pelo GitHub Pages.
+
+> Dica: se preferir hospedar a partir de uma pasta (ex.: `/docs`), mova `index.html`, `style.css` e os arquivos `.js` para essa pasta e ajuste a configuração do Pages para apontar para ela.
+
 ## Autenticação interativa
 - `auth`: inicia o fluxo de login. Informe email e senha (campo de senha é mascarado). Sucesso limpa o terminal e mostra `Welcome to your future brain, @username`.
 - `auth --register`: inicia o cadastro com validação de senha forte (8+ com maiúscula, minúscula e número) e username obrigatório. Cria o perfil na tabela `profiles`.
