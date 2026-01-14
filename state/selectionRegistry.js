@@ -15,6 +15,10 @@ export function setList(items, options = {}) {
   };
 }
 
+export function setLastSelect(items, options = {}) {
+  setList(items, options);
+}
+
 export function getByIndex(index) {
   if (!Number.isFinite(index)) return null;
   const position = Math.trunc(index) - 1;
