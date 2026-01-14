@@ -9,15 +9,28 @@ export function normalizeRef(rawRef) {
   if (lowered === IDEA_KIND || lowered === TASK_KIND) {
     return lowered;
   }
+  // Anything outside the core kinds stays as free-form text.
   return trimmed;
 }
 
-export function getNoteKind(note) {
+export function isIdea(value) {
+  return normalizeRef(value) === IDEA_KIND;
+}
+
+export function isTask(value) {
+  return normalizeRef(value) === TASK_KIND;
+}
+
+export function getRefKind(note) {
   const normalized = normalizeRef(note?.ref ?? "");
-  if (normalized === IDEA_KIND || normalized === TASK_KIND) {
+  if (isIdea(normalized) || isTask(normalized)) {
     return normalized;
   }
   return null;
+}
+
+export function getNoteKind(note) {
+  return getRefKind(note);
 }
 
 export function getKindStyle(kind) {
@@ -45,8 +58,4 @@ export function getKindStyle(kind) {
 export function getRefLabel(note) {
   const normalized = normalizeRef(note?.ref ?? "");
   return normalized || "-";
-}
-
-export function isIdeaOrTask(value) {
-  return value === IDEA_KIND || value === TASK_KIND;
 }

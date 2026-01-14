@@ -16,7 +16,13 @@ function parseIndex(value) {
   if (!value) return null;
   const cleaned = value.startsWith("#") ? value.slice(1) : value;
   const parsed = Number.parseInt(cleaned, 10);
-  return Number.isNaN(parsed) ? null : parsed;
+  if (Number.isNaN(parsed) || parsed <= 0) return null;
+  return parsed;
+}
+
+function isIndexToken(value) {
+  if (!value) return false;
+  return /^#?\d+$/.test(value.trim());
 }
 
 function parseOpenNoteId(raw) {
@@ -68,6 +74,11 @@ export function openCommand(bus) {
     const pairs = parseKeyValuePairs(raw);
     const id = pairs.id?.trim();
     const noteId = parseOpenNoteId(raw);
+
+    if (isIndexToken(target) && !index) {
+      bus.emit("output:append", "Nenhuma nota encontrada para este índice.");
+      return;
+    }
 
     if (index) {
       const lastSelect = getLastSelect();
